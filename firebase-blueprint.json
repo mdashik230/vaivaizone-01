@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Store items for sale",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "image": { "type": "string" },
+        "category": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "description": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "unit": { "type": "string" },
+        "stock": { "type": "number" }
+      },
+      "required": ["id", "name", "price", "category"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Product category",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "image": { "type": "string" },
+        "icon": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase order",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerInfo": { "type": "object" },
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "status": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerInfo", "items", "total"]
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "scrollingMessage": { "type": "string" },
+        "contactInfo": { "type": "object" },
+        "grocerySettings": { "type": "object" },
+        "telegramSettings": { "type": "object" },
+        "sliders": { "type": "array" },
+        "areas": { "type": "array" }
+      }
+    },
+    "Offer": {
+      "title": "Offer",
+      "description": "Promotional offers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "badge": { "type": "string" },
+        "link": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "hidden"] }
+      },
+      "required": ["id", "title", "image", "status"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "List of products"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Product categories"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders"
+    },
+    "/configs/main": {
+      "schema": "AppConfig",
+      "description": "Main application configuration"
+    },
+    "/offers/{offerId}": {
+      "schema": "Offer",
+      "description": "Special offers and promotions"
+    }
+  }
+}

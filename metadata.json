@@ -1,0 +1,6 @@
+{
+  "name": "Vai Vai Zone",
+  "description": "A full-stack, mobile-first e-commerce platform with real-time tracking, admin dashboard, user profiles, and seamless shopping experience for gadgets and fashion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
