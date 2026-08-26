@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogIn, LogOut, Mail, ChevronRight, AlertCircle, ShieldCheck, UserCheck, RefreshCw } from 'lucide-react';
+import { LogIn, LogOut, Mail, ChevronRight, AlertCircle, ShieldCheck, UserCheck, RefreshCw, Copy, Check, ExternalLink, Globe } from 'lucide-react';
 import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -11,11 +11,15 @@ export default function LoginPage() {
   const { user, isAdmin, loading, logout } = useAuth();
   const { language } = useSettings();
   const [error, setError] = useState<string | null>(null);
+  const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const redirectParam = searchParams.get("redirect");
+
+  const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
 
   // Redirect only if authorized admin or explicit customer redirect flow
   React.useEffect(() => {
@@ -31,6 +35,7 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
     setError(null);
+    setIsUnauthorizedDomain(false);
     try {
       if (user) {
         await auth.signOut();
@@ -43,10 +48,23 @@ export default function LoginPage() {
       if (err.code === 'auth/popup-closed-by-user') {
         return;
       }
-      console.error(err);
-      setError(err.message || "Login failed. Please try again.");
+      console.error("Login Error Details:", err);
+      if (err.code === 'auth/unauthorized-domain' || (err.message && err.message.includes('unauthorized-domain'))) {
+        setIsUnauthorizedDomain(true);
+        setError("Firebase Authorized Domain Error: এই ডোমেনটি Firebase Console এ অনুমোদিত নয়।");
+      } else {
+        setError(err.message || "Login failed. Please try again.");
+      }
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  const copyDomain = () => {
+    if (currentDomain) {
+      navigator.clipboard.writeText(currentDomain);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
     }
   };
 
@@ -54,6 +72,7 @@ export default function LoginPage() {
     try {
       await logout();
       setError(null);
+      setIsUnauthorizedDomain(false);
     } catch (err: any) {
       console.error(err);
     }
@@ -160,7 +179,58 @@ export default function LoginPage() {
               )}
 
               <AnimatePresence>
-                {error && (
+                {isUnauthorizedDomain && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.96 }}
+                    className="p-5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-300 dark:border-amber-700/50 space-y-4 text-left"
+                  >
+                    <div className="flex items-center gap-2 text-amber-900 dark:text-amber-300 text-xs font-black uppercase tracking-wider">
+                      <Globe size={16} className="text-amber-600" />
+                      <span>Firebase Authorized Domain সমাধান</span>
+                    </div>
+
+                    <p className="text-xs text-amber-900/90 dark:text-amber-200/90 leading-relaxed font-medium">
+                      আপনার নতুন ফায়ারবেস প্রজেক্ট (<span className="font-mono font-bold">vai-vai-zone01</span>) এ গুগল লগইন কাজ করার জন্য নিচের ডোমেনটি Firebase Console এ যুক্ত করতে হবে:
+                    </p>
+
+                    <div className="flex items-center gap-2 bg-white dark:bg-neutral-900 border border-amber-200 dark:border-amber-900/50 p-2.5 rounded-xl">
+                      <span className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 truncate flex-1 select-all">
+                        {currentDomain}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={copyDomain}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+                      >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
+                        <span>{copied ? "কপি হয়েছে!" : "কপি করুন"}</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 text-[11px] text-amber-900/80 dark:text-amber-300/80 font-medium">
+                      <p className="font-bold">কীভাবে যুক্ত করবেন (৩টি সহজ ধাপ):</p>
+                      <ol className="list-decimal list-inside space-y-1 pl-1">
+                        <li><strong>Firebase Console</strong> এ যান &gt; <strong>Authentication</strong> &gt; <strong>Settings</strong> ট্যাবে ক্লিক করুন।</li>
+                        <li><strong>Authorized domains</strong> সেকশনে <strong>Add domain</strong> এ ক্লিক করুন।</li>
+                        <li>উপরের কপি করা ডোমেনটি পেস্ট করে <strong>Add</strong> চাপুন।</li>
+                      </ol>
+                    </div>
+
+                    <a 
+                      href="https://console.firebase.google.com/project/vai-vai-zone01/authentication/settings" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all shadow-sm"
+                    >
+                      <ExternalLink size={14} />
+                      <span>Firebase Settings খুলুন</span>
+                    </a>
+                  </motion.div>
+                )}
+
+                {error && !isUnauthorizedDomain && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}

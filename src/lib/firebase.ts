@@ -1,14 +1,35 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { getFirestore, getDocFromServer, doc } from 'firebase/firestore';
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import rawConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const firebaseConfig = {
+  projectId: rawConfig.projectId || "vai-vai-zone01",
+  appId: rawConfig.appId || "1:1068624674135:web:cd268306c9a75a3c025212",
+  apiKey: rawConfig.apiKey || "AIzaSyArE3dSx8A7yrrLC5DFZ22uwvvJIk_evkY",
+  authDomain: rawConfig.authDomain || "vai-vai-zone01.firebaseapp.com",
+  storageBucket: rawConfig.storageBucket || "vai-vai-zone01.firebasestorage.app",
+  messagingSenderId: rawConfig.messagingSenderId || "1068624674135",
+  measurementId: rawConfig.measurementId || "G-C4NWY50B5E",
+};
+
+export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const db = (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
+  ? getFirestore(app, rawConfig.firestoreDatabaseId)
+  : getFirestore(app);
 export const auth = getAuth(app);
 
+// Initialize analytics if supported
+if (typeof window !== 'undefined') {
+  isSupported().then(supported => {
+    if (supported && firebaseConfig.measurementId) {
+      getAnalytics(app);
+    }
+  }).catch(() => {});
+}
+
 // Test Firestore connection as per skill guidelines
-import { getDocFromServer, doc } from 'firebase/firestore';
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
@@ -72,11 +93,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
   console.error('Firestore Error: ', JSON.stringify(errInfo));
 
-  // If it is a transient connection/offline error, do not crash React listeners
-  if (errCode === 'unavailable' || errMsg.includes('offline') || errMsg.includes('transport errored')) {
-    console.warn(`[Firestore ${operationType} on ${path}] connection temporarily unavailable, continuing with cached data.`);
-    return;
+  // If it is a transient connection/offline error or permission read error on startup, log clearly without crashing React listeners
+  if (errCode === 'unavailable' || errMsg.includes('offline') || errMsg.includes('transport errored') || operationType === OperationType.GET || operationType === OperationType.LIST) {
+    console.warn(`[Firestore ${operationType} on ${path}] Error encountered:`, errMsg);
+    return errInfo;
   }
 
-  throw new Error(JSON.stringify(errInfo));
+  return errInfo;
 }

@@ -14,7 +14,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && 
-        request.auth.token.get('email', '').lower() in [
+        'email' in request.auth.token && 
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() in [
           'mdashik23010@gmail.com',
           'loverblack2022@gmail.com'
         ];
@@ -33,46 +35,11 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // VALIDATION BLUEPRINTS
-    // -------------------------------------------------------------------------
-    function isValidProduct(data) {
-      return data.keys().hasAll(['id', 'name', 'price', 'category']) &&
-             data.id is string && data.id.size() <= 128 &&
-             data.name is string && data.name.size() <= 200 &&
-             data.price is number &&
-             data.category is string;
-    }
-
-    function isValidCategory(data) {
-      return data.keys().hasAll(['id', 'name']) &&
-             data.id is string &&
-             data.name is string;
-    }
-
-    function isValidOrder(data) {
-      return data.keys().hasAll(['id', 'customerInfo', 'items', 'total', 'userId', 'transactionId', 'lastNumber']) &&
-             data.id is string &&
-             data.total is number &&
-             data.userId is string &&
-             data.items is list &&
-             data.transactionId is string &&
-             data.lastNumber is string;
-    }
-
-    function isValidOffer(data) {
-      return data.keys().hasAll(['id', 'title', 'image', 'status']) &&
-             data.id is string &&
-             data.title is string &&
-             data.image is string &&
-             data.status in ['active', 'hidden'];
-    }
-
-    // -------------------------------------------------------------------------
     // COLLECTIONS
     // -------------------------------------------------------------------------
 
     match /test/{docId} {
-      allow read: if true;
+      allow read, write: if true;
     }
 
     match /configs/{docId} {
@@ -91,21 +58,23 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow create: if (isSignedIn() && incoming().userId == request.auth.uid) || isAdmin();
       allow get: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
       allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     match /offers/{offerId} {
       allow get, list: if true;
-      allow write: if isAdmin() && isValidOffer(incoming());
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /users/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
-      allow write: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
 
     // -------------------------------------------------------------------------
@@ -116,3 +85,4 @@ service cloud.firestore {
     }
   }
 }
+

@@ -3,7 +3,7 @@
   "appId": "1:1068624674135:web:cd268306c9a75a3c025212",
   "apiKey": "AIzaSyArE3dSx8A7yrrLC5DFZ22uwvvJIk_evkY",
   "authDomain": "vai-vai-zone01.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-849a0169-b758-49fe-8c7f-b78c8abe51d0",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "vai-vai-zone01.firebasestorage.app",
   "messagingSenderId": "1068624674135",
   "measurementId": "G-C4NWY50B5E"

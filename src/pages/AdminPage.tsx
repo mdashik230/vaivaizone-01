@@ -439,7 +439,14 @@ export default function AdminPage() {
                 <button onClick={() => setEditingSlider(slider)} className="flex-1 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl font-bold text-blue-500 flex items-center justify-center gap-2">
                   <Edit2 size={14}/> Edit
                 </button>
-                <button onClick={() => removeSlider(slider.id)} className="flex-1 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl font-bold text-red-500 flex items-center justify-center gap-2">
+                <button onClick={async () => {
+                  try {
+                    await removeSlider(slider.id);
+                    showNotification('স্লাইডার রিমুভ করা হয়েছে');
+                  } catch (err) {
+                    showNotification('স্লাইডার ডিলিট করতে সমস্যা হয়েছে', 'error');
+                  }
+                }} className="flex-1 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-xl font-bold text-red-500 flex items-center justify-center gap-2">
                   <Trash2 size={14}/> Remove
                 </button>
               </div>
@@ -611,7 +618,14 @@ export default function AdminPage() {
                 <p className="text-sm text-neutral-500 font-bold mb-4">{offer.description}</p>
                 <div className="flex gap-2">
                    <button onClick={() => setEditingOffer(offer)} className="flex-1 py-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl font-bold text-xs"><Edit2 size={12} className="inline mr-1"/> Edit</button>
-                   <button onClick={() => removeOffer(offer.id)} className="flex-1 py-3 bg-red-50 text-red-500 rounded-xl font-bold text-xs"><Trash2 size={12} className="inline mr-1"/> Remove</button>
+                   <button onClick={async () => {
+                     try {
+                       await removeOffer(offer.id);
+                       showNotification('অফার রিমুভ করা হয়েছে');
+                     } catch (err) {
+                       showNotification('অফার ডিলিট করতে সমস্যা হয়েছে', 'error');
+                     }
+                   }} className="flex-1 py-3 bg-red-50 text-red-500 rounded-xl font-bold text-xs"><Trash2 size={12} className="inline mr-1"/> Remove</button>
                 </div>
              </div>
           </div>
@@ -1026,7 +1040,14 @@ export default function AdminPage() {
                   <h4 className="font-black text-lg">{cat.name}</h4>
                   <div className="flex gap-1">
                     <button onClick={() => setEditingCategory(cat)} className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-xl"><Edit2 size={16}/></button>
-                    <button onClick={() => removeCategory(cat.id)} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl"><Trash2 size={16}/></button>
+                    <button onClick={async () => {
+                      try {
+                        await removeCategory(cat.id);
+                        showNotification('ক্যাটাগরি ডিলিট করা হয়েছে');
+                      } catch (err) {
+                        showNotification('ক্যাটাগরি ডিলিট করতে সমস্যা হয়েছে', 'error');
+                      }
+                    }} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl"><Trash2 size={16}/></button>
                   </div>
                 </div>
                 <p className="text-xs text-neutral-400 font-bold mt-1">{cat.subcategories?.length || 0} Sub-categories</p>
@@ -1125,18 +1146,23 @@ export default function AdminPage() {
               </div>
 
               <button 
-                onClick={() => {
-                  if (editingCategory.id) {
-                    updateCategory(editingCategory.id, editingCategory);
-                  } else {
-                    addCategory({
-                      ...editingCategory,
-                      id: editingCategory.name?.toLowerCase().replace(/\s+/g, '-') || `cat-${Date.now()}`,
-                      count: 0
-                    } as Category);
+                onClick={async () => {
+                  try {
+                    if (!editingCategory.name) return showNotification('ক্যাটাগরির নাম দিন', 'error');
+                    if (editingCategory.id) {
+                      await updateCategory(editingCategory.id, editingCategory);
+                    } else {
+                      await addCategory({
+                        ...editingCategory,
+                        id: editingCategory.name?.toLowerCase().replace(/\s+/g, '-') || `cat-${Date.now()}`,
+                        count: 0
+                      } as Category);
+                    }
+                    setEditingCategory(null);
+                    showNotification('ক্যাটাগরি সেভ করা হয়েছে');
+                  } catch (err) {
+                    showNotification('ক্যাটাগরি সেভ করতে সমস্যা হয়েছে', 'error');
                   }
-                  setEditingCategory(null);
-                  showNotification('ক্যাটাগরি আপডেট করা হয়েছে');
                 }}
                 className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg"
               >
@@ -1251,31 +1277,35 @@ export default function AdminPage() {
                 </div>
 
                 <button 
-                  onClick={() => {
-                    if (!editingSubcategory.parentId) return showNotification('মেইন ক্যাটাগরি সিলেক্ট করুন', 'error');
-                    if (!editingSubcategory.sub.name) return showNotification('নাম দিন', 'error');
+                  onClick={async () => {
+                    try {
+                      if (!editingSubcategory.parentId) return showNotification('মেইন ক্যাটাগরি সিলেক্ট করুন', 'error');
+                      if (!editingSubcategory.sub.name) return showNotification('নাম দিন', 'error');
 
-                    const parentId = editingSubcategory.parentId;
-                    const cat = categories[parentId];
-                    const currentSubs = [...(cat.subcategories || [])];
+                      const parentId = editingSubcategory.parentId;
+                      const cat = categories[parentId];
+                      const currentSubs = [...(cat.subcategories || [])];
 
-                    if (editingSubcategory.sub.id) {
-                      // Update
-                      const idx = currentSubs.findIndex(s => s.id === editingSubcategory.sub.id);
-                      if (idx !== -1) {
-                        currentSubs[idx] = editingSubcategory.sub as Subcategory;
+                      if (editingSubcategory.sub.id) {
+                        // Update
+                        const idx = currentSubs.findIndex(s => s.id === editingSubcategory.sub.id);
+                        if (idx !== -1) {
+                          currentSubs[idx] = editingSubcategory.sub as Subcategory;
+                        }
+                      } else {
+                        // Add
+                        currentSubs.push({
+                          ...editingSubcategory.sub,
+                          id: `sub-${Date.now()}`
+                        } as Subcategory);
                       }
-                    } else {
-                      // Add
-                      currentSubs.push({
-                        ...editingSubcategory.sub,
-                        id: `sub-${Date.now()}`
-                      } as Subcategory);
-                    }
 
-                    updateCategory(parentId, { subcategories: currentSubs });
-                    setEditingSubcategory(null);
-                    showNotification('সাব-ক্যাটাগরি সেভ করা হয়েছে');
+                      await updateCategory(parentId, { subcategories: currentSubs });
+                      setEditingSubcategory(null);
+                      showNotification('সাব-ক্যাটাগরি সেভ করা হয়েছে');
+                    } catch (err) {
+                      showNotification('সাব-ক্যাটাগরি সেভ করতে সমস্যা হয়েছে', 'error');
+                    }
                   }}
                   className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg"
                 >
@@ -2489,14 +2519,19 @@ export default function AdminPage() {
                 </div>
 
                 <button 
-                  onClick={() => {
-                    if (editingProduct.id) {
-                      updateProduct(editingProduct as Product);
-                    } else {
-                      addProduct(editingProduct as Product);
+                  onClick={async () => {
+                    try {
+                      if (!editingProduct.name) return showNotification('প্রডাক্টের নাম দিন', 'error');
+                      if (editingProduct.id) {
+                        await updateProduct(editingProduct as Product);
+                      } else {
+                        await addProduct(editingProduct as Product);
+                      }
+                      setIsProductModalOpen(false);
+                      showNotification('প্রডাক্ট সফলভাবে সেভ করা হয়েছে!');
+                    } catch (err) {
+                      showNotification('প্রডাক্ট সেভ করতে সমস্যা হয়েছে', 'error');
                     }
-                    setIsProductModalOpen(false);
-                    showNotification('Product saved!');
                   }}
                   className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg mt-8"
                 >
@@ -2544,14 +2579,19 @@ export default function AdminPage() {
                    </div>
                 </div>
                 <button 
-                  onClick={() => {
-                    if (editingSlider.id) {
-                      updateSlider(editingSlider.id, editingSlider);
-                    } else {
-                      addSlider({ ...editingSlider, id: `slider-${Date.now()}` } as any);
+                  onClick={async () => {
+                    try {
+                      if (!editingSlider.image) return showNotification('স্লাইডার ইমেজ দিন', 'error');
+                      if (editingSlider.id) {
+                        await updateSlider(editingSlider.id, editingSlider);
+                      } else {
+                        await addSlider({ ...editingSlider, id: `slider-${Date.now()}` } as any);
+                      }
+                      setEditingSlider(null);
+                      showNotification('স্লাইডার সেভ করা হয়েছে!');
+                    } catch (err) {
+                      showNotification('স্লাইডার সেভ করতে সমস্যা হয়েছে', 'error');
                     }
-                    setEditingSlider(null);
-                    showNotification('Slider saved!');
                   }}
                   className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg mt-8"
                 >
@@ -2612,14 +2652,19 @@ export default function AdminPage() {
                    </div>
                 </div>
                 <button 
-                  onClick={() => {
-                    if (editingOffer.id) {
-                      updateOffer(editingOffer.id, editingOffer);
-                    } else {
-                      addOffer({ ...editingOffer, id: `offer-${Date.now()}` } as Offer);
+                  onClick={async () => {
+                    try {
+                      if (!editingOffer.title) return showNotification('অফার টাইটেল দিন', 'error');
+                      if (editingOffer.id) {
+                        await updateOffer(editingOffer.id, editingOffer);
+                      } else {
+                        await addOffer({ ...editingOffer, id: `offer-${Date.now()}` } as Offer);
+                      }
+                      setEditingOffer(null);
+                      showNotification('অফার সেভ করা হয়েছে!');
+                    } catch (err) {
+                      showNotification('অফার সেভ করতে সমস্যা হয়েছে', 'error');
                     }
-                    setEditingOffer(null);
-                    showNotification('Offer saved!');
                   }}
                   className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg mt-8"
                 >
@@ -2758,9 +2803,13 @@ export default function AdminPage() {
                 <p className="text-neutral-500 mb-8">নিশ্চিত তো? এটি আর ফিরিয়ে আনা যাবে না।</p>
                 <div className="flex gap-4">
                   <button onClick={() => setDeleteConfirmId(null)} className="flex-1 py-4 bg-neutral-100 rounded-2xl font-black">না</button>
-                  <button onClick={() => {
-                    removeProduct(deleteConfirmId);
-                    showNotification('প্রডাক্ট ডিলিট করা হয়েছে');
+                  <button onClick={async () => {
+                    try {
+                      await removeProduct(deleteConfirmId);
+                      showNotification('প্রডাক্ট ডিলিট করা হয়েছে');
+                    } catch (err) {
+                      showNotification('প্রডাক্ট ডিলিট করতে সমস্যা হয়েছে', 'error');
+                    }
                     setDeleteConfirmId(null);
                   }} className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black">হ্যাঁ</button>
                 </div>
