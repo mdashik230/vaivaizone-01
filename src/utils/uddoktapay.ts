@@ -12,8 +12,13 @@ export function normalizeUddoktaPayUrl(url?: string): string {
   clean = clean.replace(/\/api\/checkout-v2\/?$/i, "");
   clean = clean.replace(/\/checkout-v2\/?$/i, "");
   clean = clean.replace(/\/api\/verify-payment\/?$/i, "");
+  clean = clean.replace(/\/verify-payment\/?$/i, "");
   clean = clean.replace(/\/api\/?$/i, "");
-  return clean.replace(/\/+$/, "");
+  clean = clean.replace(/\/+$/, "");
+  if (clean && !clean.startsWith("http://") && !clean.startsWith("https://")) {
+    clean = "https://" + clean;
+  }
+  return clean;
 }
 
 /**
@@ -96,6 +101,91 @@ export function parsePaymentCallbackParams(urlStr: string = typeof window !== 'u
 }
 
 /**
+ * Unified gateway caller that supports:
+ * 1. Direct browser fetch with CORS (natively supported on Paymently and modern setups)
+ * 2. Local proxy /api/uddoktapay/* (for AI Studio dev server & Vercel serverless)
+ * 3. Resilient fallback so static hosts without local proxy endpoints never return a false 404
+ */
+async function callUddoktaPayGateway(
+  endpoint: "/api/checkout-v2" | "/api/verify-payment",
+  payload: any,
+  baseUrl: string,
+  apiKey: string
+): Promise<{ ok: boolean; status: number; data: any; errorText?: string }> {
+  const targetUrl = `${baseUrl}${endpoint}`;
+  const isPaymently = baseUrl.toLowerCase().includes("paymently.io");
+
+  // Strategy 1: Paymently has full CORS support (Access-Control-Allow-Origin: *).
+  // Calling directly from browser works everywhere, completely independent of serverless proxies!
+  if (isPaymently) {
+    try {
+      const directRes = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "RT-UDDOKTAPAY-API-KEY": apiKey,
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await directRes.json().catch(() => null);
+      if (data !== null) {
+        return { ok: directRes.ok, status: directRes.status, data };
+      }
+    } catch {
+      // If direct call failed (e.g. adblocker, network), fall through to proxy
+    }
+  }
+
+  // Strategy 2: Call through local proxy /api/uddoktapay/*
+  const proxyEndpoint = `/api/uddoktapay${endpoint.replace("/api", "")}`;
+  try {
+    const proxyRes = await fetch(proxyEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "RT-UDDOKTAPAY-API-KEY": apiKey,
+        "x-api-url": baseUrl,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    // Only accept proxy response if the route actually exists (not a 404/405/502 from static host)
+    if (proxyRes.status !== 404 && proxyRes.status !== 405 && proxyRes.status !== 502) {
+      const data = await proxyRes.json().catch(() => null);
+      if (data !== null) {
+        return { ok: proxyRes.ok, status: proxyRes.status, data };
+      }
+    }
+  } catch {
+    // Local proxy call failed, proceed to direct fallback
+  }
+
+  // Strategy 3: Direct call fallback
+  try {
+    const directRes = await fetch(targetUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "RT-UDDOKTAPAY-API-KEY": apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await directRes.json().catch(() => null);
+    return { ok: directRes.ok, status: directRes.status, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      errorText: err?.message || "গেটওয়ে সার্ভারের সাথে যোগাযোগ করা যায়নি।",
+    };
+  }
+}
+
+/**
  * Creates an UddoktaPay checkout charge and returns the payment redirect URL.
  */
 export async function createUddoktaPayCharge(
@@ -130,48 +220,32 @@ export async function createUddoktaPayCharge(
   };
 
   try {
-    // Attempt through local proxy first to avoid browser CORS issues
-    const proxyResponse = await fetch("/api/uddoktapay/checkout-v2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "RT-UDDOKTAPAY-API-KEY": apiKey,
-        "x-api-url": baseUrl,
-      },
-      body: JSON.stringify(payload),
-    });
+    const { data, errorText } = await callUddoktaPayGateway(
+      "/api/checkout-v2",
+      payload,
+      baseUrl,
+      apiKey
+    );
 
-    if (proxyResponse.ok) {
-      const data = await proxyResponse.json();
-      if (data.status && data.payment_url) {
-        return { status: true, payment_url: data.payment_url };
-      }
-      return {
-        status: false,
-        message: data.message || "পেমেন্ট সেশন তৈরি করা যায়নি।",
-      };
+    if (data && data.status && data.payment_url) {
+      return { status: true, payment_url: data.payment_url };
     }
 
-    // Direct fallback if proxy is unavailable
-    const directResponse = await fetch(`${baseUrl}/api/checkout-v2`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "RT-UDDOKTAPAY-API-KEY": apiKey,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const directData = await directResponse.json();
-    if (directData.status && directData.payment_url) {
-      return { status: true, payment_url: directData.payment_url };
+    const msg = data?.message || errorText || "পেমেন্ট সেশন তৈরি করা যায়নি।";
+    let userMsg = msg;
+    const lower = typeof msg === "string" ? msg.toLowerCase() : "";
+    if (
+      lower.includes("invalid or expired api key") ||
+      lower.includes("api do not match") ||
+      lower.includes("unauthorized")
+    ) {
+      userMsg =
+        "UddoktaPay / Paymently API Key বা ডোমেন মেলেনি। অনুগ্রহ করে এডমিন প্যানেল থেকে সঠিক ডোমেন URL এবং বর্তমান API Key নিশ্চিত করুন।";
     }
 
     return {
       status: false,
-      message: directData.message || "পেমেন্ট গেটওয়েতে সংযোগ করতে ব্যর্থ হয়েছে।",
+      message: userMsg,
     };
   } catch (error: any) {
     console.error("UddoktaPay create charge error:", error);
@@ -202,34 +276,21 @@ export async function verifyUddoktaPayPayment(
   const payload = { invoice_id: invoiceId };
 
   try {
-    const proxyResponse = await fetch("/api/uddoktapay/verify-payment", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "RT-UDDOKTAPAY-API-KEY": apiKey,
-        "x-api-url": baseUrl,
-      },
-      body: JSON.stringify(payload),
-    });
+    const { data, errorText } = await callUddoktaPayGateway(
+      "/api/verify-payment",
+      payload,
+      baseUrl,
+      apiKey
+    );
 
-    if (proxyResponse.ok) {
-      const data = await proxyResponse.json();
+    if (data) {
       return data;
     }
 
-    // Direct fallback
-    const directResponse = await fetch(`${baseUrl}/api/verify-payment`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "RT-UDDOKTAPAY-API-KEY": apiKey,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    return await directResponse.json();
+    return {
+      status: "ERROR",
+      message: errorText || "পেমেন্ট ভেরিফাই করতে গেটওয়ে থেকে কোনো রেসপন্স পাওয়া যায়নি।",
+    };
   } catch (error: any) {
     console.error("UddoktaPay verify error:", error);
     return {
@@ -257,37 +318,61 @@ export async function testUddoktaPayConnection(
   }
 
   try {
-    // Call verify-payment with a test invoice id
-    const res = await fetch("/api/uddoktapay/verify-payment", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "RT-UDDOKTAPAY-API-KEY": apiKey,
-        "x-api-url": baseUrl,
+    const testOrigin =
+      typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+
+    const { data, errorText } = await callUddoktaPayGateway(
+      "/api/checkout-v2",
+      {
+        full_name: "Connection Test",
+        email: "test@connection.check",
+        amount: "10",
+        metadata: { test_probe: true },
+        redirect_url: `${testOrigin}/test-verify`,
+        cancel_url: `${testOrigin}/test-cancel`,
       },
-      body: JSON.stringify({ invoice_id: "connection_test" }),
-    });
+      baseUrl,
+      apiKey
+    );
 
-    const data = await res.json().catch(() => null);
-
-    // If server responds with 401 or invalid API key message
-    if (res.status === 401 || (data && typeof data.message === 'string' && data.message.toLowerCase().includes('unauthorized'))) {
-      return { success: false, message: "API Key সঠিক নয় বা এক্সেস ডিনাইড হয়েছে।" };
+    // Success check: payment_url returned
+    if (data?.status && data?.payment_url) {
+      const isPaymently = baseUrl.includes("paymently.io");
+      const modeLabel = isPaymently
+        ? "Paymently"
+        : settings.isSandbox
+        ? "Sandbox"
+        : "UddoktaPay Live";
+      return {
+        success: true,
+        message: `সংযোগ সফল! আপনার ${modeLabel} গেটওয়ে ও API Key সম্পূর্ণ সক্রিয় এবং পেমেন্ট গ্রহণের জন্য প্রস্তুত।`,
+      };
     }
 
-    // If invoice not found or status false with standard message, API Key & connection are good!
-    if (data && (data.message?.toLowerCase().includes("invoice") || data.message?.toLowerCase().includes("not found") || data.status !== undefined)) {
-      return { success: true, message: "সংযোগ সফল! UddoktaPay API Key এবং URL সক্রিয় রয়েছে।" };
+    // Check specific error messages
+    const rawMsg =
+      data?.message ||
+      errorText ||
+      (data ? JSON.stringify(data) : "গেটওয়ে থেকে কোনো ডেটা পাওয়া যায়নি");
+    const lower = typeof rawMsg === "string" ? rawMsg.toLowerCase() : "";
+
+    if (lower.includes("invalid or expired api key")) {
+      return {
+        success: false,
+        message: `API Key সঠিক নয় বা মেয়াদ শেষ হয়েছে (${rawMsg})। অনুগ্রহ করে Paymently ড্যাশবোর্ড (Settings > API) থেকে সক্রিয় API Key কপি করে পেস্ট করুন।`,
+      };
     }
 
-    if (res.ok) {
-      return { success: true, message: "সংযোগ সফল! গেটওয়ে রেসপন্স করছে।" };
+    if (lower.includes("api do not match") || lower.includes("unauthorized") || lower.includes("forbidden")) {
+      return {
+        success: false,
+        message: `API Key অথবা ডোমেন URL মেলেনি (${rawMsg})। নিশ্চিত করুন যে আপনি ${baseUrl}-এর সঠিক API Key প্রদান করেছেন।`,
+      };
     }
 
     return {
       success: false,
-      message: data?.message || `গেটওয়ে থেকে রেসপন্স: ${res.status} ${res.statusText}`,
+      message: `গেটওয়ে থেকে রেসপন্স: ${rawMsg}`,
     };
   } catch (err: any) {
     return {

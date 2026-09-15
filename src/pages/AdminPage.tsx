@@ -208,6 +208,7 @@ export default function AdminPage() {
         : Boolean(localUddoktaPay.apiKey?.trim());
       const settingsToSave: UddoktaPaySettings = {
         ...localUddoktaPay,
+        apiKey: localUddoktaPay.apiKey?.trim() || '',
         apiUrl: cleanUrl || (localUddoktaPay.isSandbox ? DEFAULT_SANDBOX_URL : 'https://pay.uddoktapay.com'),
         isEnabled,
       };
@@ -1528,24 +1529,24 @@ export default function AdminPage() {
       {/* Guide Card */}
       <div className="p-8 bg-neutral-50 dark:bg-neutral-900/60 rounded-[2.5rem] border border-neutral-200 dark:border-neutral-800 space-y-4">
         <h4 className="font-black text-sm text-neutral-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-          📖 কিভাবে UddoktaPay চালু করবেন?
+          📖 কিভাবে UddoktaPay / Paymently চালু করবেন?
         </h4>
         <div className="space-y-3 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed font-medium">
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">১</span>
-            <p>প্রথমে <a href="https://uddoktapay.com" target="_blank" rel="noreferrer" className="text-emerald-600 font-bold underline">UddoktaPay ওয়েবসাইটে</a> গিয়ে একটি মার্চেন্ট অ্যাকাউন্ট তৈরি বা লগইন করুন।</p>
+            <p>প্রথমে <a href="https://paymently.io" target="_blank" rel="noreferrer" className="text-emerald-600 font-bold underline">Paymently</a> অথবা <a href="https://uddoktapay.com" target="_blank" rel="noreferrer" className="text-emerald-600 font-bold underline">UddoktaPay</a>-তে আপনার মার্চেন্ট অ্যাকাউন্টে লগইন করুন।</p>
           </div>
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">২</span>
-            <p>ড্যাশবোর্ড থেকে <b>Settings / API</b> পেজে গিয়ে আপনার মার্চেন্ট <b>API Key</b> কপি করুন।</p>
+            <p>ড্যাশবোর্ড থেকে <b>Settings / API</b> পেজে গিয়ে আপনার মার্চেন্ট <b>API Key</b> কপি করে উপরে পেস্ট করুন।</p>
           </div>
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">৩</span>
-            <p>উপরে <b>"API Key"</b> বক্সে কি পেস্ট করুন এবং <b>"অটোমেটিক পেমেন্ট গেটওয়ে চালু করুন"</b> সুইচ অন করুন।</p>
+            <p><b>API Base URL:</b> আপনার প্যানেল লিংকটি দিন (যেমন: <code className="font-mono font-bold text-emerald-600">https://vaivaizone.paymently.io</code>)। শুধু মূল ডোমেন লিংকটি দিলেই হবে (শেষে <code className="text-rose-500 font-mono font-bold">/api</code> বা <code className="text-rose-500 font-mono font-bold">/checkout-v2</code> দেওয়ার প্রয়োজন নেই)।</p>
           </div>
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">৪</span>
-            <p><b>"টেস্ট কানেকশন"</b> বাটনে চাপ দিয়ে যাচাই করুন এবং <b>"গেটওয়ে সেটিংস সেভ করুন"</b> বাটনে ক্লিক করুন। ব্যস, গ্রাহক এখন চেকআউটে সরাসরি বিকাশ, নগদ, রকেট দিয়ে পেমেন্ট সম্পন্ন করতে পারবে এবং পেমেন্ট স্বয়ংক্রিয়ভাবে ভেরিফাই হয়ে যাবে!</p>
+            <p><b>"টেস্ট কানেকশন"</b> বাটনে চাপ দিয়ে সবুজ রঙের সফলতার মেসেজ নিশ্চিত করুন এবং <b>"গেটওয়ে সেটিংস সেভ করুন"</b> বাটনে ক্লিক করুন।</p>
           </div>
         </div>
       </div>

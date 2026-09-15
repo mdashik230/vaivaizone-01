@@ -112,8 +112,12 @@ function uddoktaPayProxyPlugin(): Plugin {
     cleanBaseUrl = cleanBaseUrl.replace(/\/api\/checkout-v2\/?$/i, '');
     cleanBaseUrl = cleanBaseUrl.replace(/\/checkout-v2\/?$/i, '');
     cleanBaseUrl = cleanBaseUrl.replace(/\/api\/verify-payment\/?$/i, '');
+    cleanBaseUrl = cleanBaseUrl.replace(/\/verify-payment\/?$/i, '');
     cleanBaseUrl = cleanBaseUrl.replace(/\/api\/?$/i, '');
     cleanBaseUrl = cleanBaseUrl.replace(/\/+$/, '');
+    if (cleanBaseUrl && !cleanBaseUrl.startsWith('http://') && !cleanBaseUrl.startsWith('https://')) {
+      cleanBaseUrl = 'https://' + cleanBaseUrl;
+    }
     if (!cleanBaseUrl) cleanBaseUrl = 'https://sandbox.uddoktapay.com';
 
     const targetUrl = `${cleanBaseUrl}/api/${endpoint}`;
