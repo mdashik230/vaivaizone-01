@@ -67,6 +67,7 @@ function AnimatedRoutes() {
     { path: "/cart", element: <CartPage /> },
     { path: "/checkout", element: <CheckoutPage /> },
     { path: "/payment-verify", element: <PaymentVerifyPage /> },
+    { path: "/payment-verify/:orderId", element: <PaymentVerifyPage /> },
     { path: "/product/:productId", element: <ProductDetailsPage /> },
     { path: "/profile", element: <ProfilePage /> },
     { path: "/contact", element: <ContactPage /> },

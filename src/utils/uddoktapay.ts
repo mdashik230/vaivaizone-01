@@ -28,6 +28,74 @@ export function getUddoktaPayBaseUrl(settings?: UddoktaPaySettings): string {
 }
 
 /**
+ * Robustly parses payment callback URL and parameters, handling malformed
+ * query strings (such as multiple ? from redirects), path parameters, and storage fallbacks.
+ */
+export function parsePaymentCallbackParams(urlStr: string = typeof window !== 'undefined' ? window.location.href : "") {
+  let orderId = "";
+  let invoiceId = "";
+  let isCancelled = false;
+  let status = "";
+  let trxId = "";
+
+  if (typeof window !== "undefined") {
+    // 1. Path param check: e.g. /payment-verify/:orderId
+    const pathname = window.location.pathname || "";
+    const pathMatch = pathname.match(/\/payment-verify\/([a-zA-Z0-9_-]+)/);
+    if (pathMatch && pathMatch[1] && pathMatch[1] !== "payment-verify") {
+      orderId = pathMatch[1].trim();
+    }
+  }
+
+  const cleanUrl = decodeURIComponent(urlStr || "");
+
+  // 2. Regex match order_id across whole URL
+  if (!orderId) {
+    const orderMatch = cleanUrl.match(/[?&]order_id=([^?&#\s]+)/i);
+    if (orderMatch && orderMatch[1]) {
+      orderId = orderMatch[1].trim();
+    }
+  }
+
+  // 3. Regex match invoice_id or invoiceId across whole URL
+  const invoiceMatch = cleanUrl.match(/[?&](?:invoice_id|invoiceId|invoice)=([^?&#\s]+)/i);
+  if (invoiceMatch && invoiceMatch[1]) {
+    invoiceId = invoiceMatch[1].trim();
+  }
+
+  // 4. Regex match transaction_id or trx_id
+  const trxMatch = cleanUrl.match(/[?&](?:transaction_id|trx_id|trxId)=([^?&#\s]+)/i);
+  if (trxMatch && trxMatch[1]) {
+    trxId = trxMatch[1].trim();
+  }
+
+  // 5. Match cancelled status
+  if (/[?&]cancelled=(true|1)/i.test(cleanUrl) || /[?&]status=(cancel|cancelled)/i.test(cleanUrl)) {
+    isCancelled = true;
+  }
+
+  // 6. Match gateway status
+  const statusMatch = cleanUrl.match(/[?&](?:status|gateway_status)=([^?&#\s]+)/i);
+  if (statusMatch && statusMatch[1]) {
+    status = statusMatch[1].trim();
+  }
+
+  // 7. Fallback to storage
+  if (typeof window !== "undefined") {
+    if (!orderId) {
+      orderId = sessionStorage.getItem("last_uddoktapay_order_id") || localStorage.getItem("last_uddoktapay_order_id") || "";
+    }
+    if (!invoiceId && orderId) {
+      invoiceId = sessionStorage.getItem(`uddoktapay_invoice_${orderId}`) || 
+                  sessionStorage.getItem("last_uddoktapay_invoice_id") || 
+                  localStorage.getItem("last_uddoktapay_invoice_id") || "";
+    }
+  }
+
+  return { orderId, invoiceId, isCancelled, status, trxId };
+}
+
+/**
  * Creates an UddoktaPay checkout charge and returns the payment redirect URL.
  */
 export async function createUddoktaPayCharge(

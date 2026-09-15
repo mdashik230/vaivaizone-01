@@ -1,6 +1,19 @@
 import { SteadfastOrderParams, SteadfastOrderResponse, SteadfastSettings } from "../types";
 
-const STEADFAST_BASE_URL = "https://portal.steadfast.com.bd/api/v1";
+const STEADFAST_BASE_URL = "https://portal.packzy.com/api/v1";
+
+/**
+ * Helper to safely extract JSON or error message from fetch Response
+ */
+async function parseResponseJson(res: Response): Promise<any> {
+  try {
+    const text = await res.text();
+    if (!text) return { status: res.status, message: res.statusText };
+    return JSON.parse(text);
+  } catch (e) {
+    return { status: res.status, message: "Invalid JSON response from server" };
+  }
+}
 
 /**
  * Creates a consignment booking with Steadfast Courier Service.
@@ -10,7 +23,8 @@ export async function createSteadfastOrder(
   params: SteadfastOrderParams,
   credentials: { apiKey: string; secretKey: string }
 ): Promise<SteadfastOrderResponse> {
-  const { apiKey, secretKey } = credentials;
+  const apiKey = credentials?.apiKey ? String(credentials.apiKey).trim() : "";
+  const secretKey = credentials?.secretKey ? String(credentials.secretKey).trim() : "";
   if (!apiKey || !secretKey) {
     return {
       status: 400,
@@ -39,8 +53,8 @@ export async function createSteadfastOrder(
       body: JSON.stringify(payload),
     });
 
-    if (!response.ok && response.status === 404) {
-      // If server proxy is not mounted, attempt direct call
+    if (!response.ok && (response.status === 404 || response.status === 500)) {
+      // If server proxy failed, attempt direct call
       const directResponse = await fetch(`${STEADFAST_BASE_URL}/create_order`, {
         method: "POST",
         headers: {
@@ -50,17 +64,31 @@ export async function createSteadfastOrder(
         },
         body: JSON.stringify(payload),
       });
-      return await directResponse.json();
+      return await parseResponseJson(directResponse);
     }
 
-    const data = await response.json();
+    const data = await parseResponseJson(response);
     return data;
   } catch (error: any) {
-    console.error("Steadfast createOrder error:", error);
-    return {
-      status: 500,
-      message: error?.message || "Failed to connect to Steadfast Courier API",
-    };
+    // Attempt direct call if network failed
+    try {
+      const directResponse = await fetch(`${STEADFAST_BASE_URL}/create_order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Api-Key": apiKey,
+          "Secret-Key": secretKey,
+        },
+        body: JSON.stringify(payload),
+      });
+      return await parseResponseJson(directResponse);
+    } catch (directErr: any) {
+      console.error("Steadfast createOrder error:", error, directErr);
+      return {
+        status: 500,
+        message: error?.message || "Failed to connect to Steadfast Courier API",
+      };
+    }
   }
 }
 
@@ -70,7 +98,8 @@ export async function createSteadfastOrder(
 export async function getSteadfastBalance(
   credentials: { apiKey: string; secretKey: string }
 ): Promise<{ status: number; current_balance?: number; message?: string }> {
-  const { apiKey, secretKey } = credentials;
+  const apiKey = credentials?.apiKey ? String(credentials.apiKey).trim() : "";
+  const secretKey = credentials?.secretKey ? String(credentials.secretKey).trim() : "";
   if (!apiKey || !secretKey) {
     return { status: 400, message: "API Key and Secret Key are missing" };
   }
@@ -84,7 +113,7 @@ export async function getSteadfastBalance(
       },
     });
 
-    if (!response.ok && response.status === 404) {
+    if (!response.ok && (response.status === 404 || response.status === 500)) {
       const directRes = await fetch(`${STEADFAST_BASE_URL}/get_balance`, {
         method: "GET",
         headers: {
@@ -92,17 +121,28 @@ export async function getSteadfastBalance(
           "Secret-Key": secretKey,
         },
       });
-      return await directRes.json();
+      return await parseResponseJson(directRes);
     }
 
-    const data = await response.json();
+    const data = await parseResponseJson(response);
     return data;
   } catch (error: any) {
-    console.error("Steadfast getBalance error:", error);
-    return {
-      status: 500,
-      message: error?.message || "Network error fetching Steadfast balance",
-    };
+    try {
+      const directRes = await fetch(`${STEADFAST_BASE_URL}/get_balance`, {
+        method: "GET",
+        headers: {
+          "Api-Key": apiKey,
+          "Secret-Key": secretKey,
+        },
+      });
+      return await parseResponseJson(directRes);
+    } catch (directErr: any) {
+      console.error("Steadfast getBalance error:", error, directErr);
+      return {
+        status: 500,
+        message: error?.message || "Network error fetching Steadfast balance",
+      };
+    }
   }
 }
 
@@ -113,13 +153,15 @@ export async function getSteadfastStatusByTrackingCode(
   trackingCode: string,
   credentials: { apiKey: string; secretKey: string }
 ): Promise<{ status: number; delivery_status?: string; message?: string }> {
-  const { apiKey, secretKey } = credentials;
-  if (!apiKey || !secretKey || !trackingCode) {
+  const apiKey = credentials?.apiKey ? String(credentials.apiKey).trim() : "";
+  const secretKey = credentials?.secretKey ? String(credentials.secretKey).trim() : "";
+  const cleanCode = (trackingCode || "").trim();
+  if (!apiKey || !secretKey || !cleanCode) {
     return { status: 400, message: "Tracking code and credentials are required" };
   }
 
   try {
-    const response = await fetch(`/api/steadfast/status_by_trackingcode/${encodeURIComponent(trackingCode)}`, {
+    const response = await fetch(`/api/steadfast/status_by_trackingcode/${encodeURIComponent(cleanCode)}`, {
       method: "GET",
       headers: {
         "Api-Key": apiKey,
@@ -127,25 +169,36 @@ export async function getSteadfastStatusByTrackingCode(
       },
     });
 
-    if (!response.ok && response.status === 404) {
-      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_trackingcode/${encodeURIComponent(trackingCode)}`, {
+    if (!response.ok && (response.status === 404 || response.status === 500)) {
+      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_trackingcode/${encodeURIComponent(cleanCode)}`, {
         method: "GET",
         headers: {
           "Api-Key": apiKey,
           "Secret-Key": secretKey,
         },
       });
-      return await directRes.json();
+      return await parseResponseJson(directRes);
     }
 
-    const data = await response.json();
+    const data = await parseResponseJson(response);
     return data;
   } catch (error: any) {
-    console.error("Steadfast getStatus error:", error);
-    return {
-      status: 500,
-      message: error?.message || "Failed to check Steadfast status",
-    };
+    try {
+      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_trackingcode/${encodeURIComponent(cleanCode)}`, {
+        method: "GET",
+        headers: {
+          "Api-Key": apiKey,
+          "Secret-Key": secretKey,
+        },
+      });
+      return await parseResponseJson(directRes);
+    } catch (directErr: any) {
+      console.error("Steadfast getStatus error:", error, directErr);
+      return {
+        status: 500,
+        message: error?.message || "Failed to check Steadfast status",
+      };
+    }
   }
 }
 
@@ -156,13 +209,15 @@ export async function getSteadfastStatusByInvoice(
   invoice: string,
   credentials: { apiKey: string; secretKey: string }
 ): Promise<{ status: number; delivery_status?: string; message?: string }> {
-  const { apiKey, secretKey } = credentials;
-  if (!apiKey || !secretKey || !invoice) {
+  const apiKey = credentials?.apiKey ? String(credentials.apiKey).trim() : "";
+  const secretKey = credentials?.secretKey ? String(credentials.secretKey).trim() : "";
+  const cleanInvoice = (invoice || "").trim();
+  if (!apiKey || !secretKey || !cleanInvoice) {
     return { status: 400, message: "Invoice and credentials are required" };
   }
 
   try {
-    const response = await fetch(`/api/steadfast/status_by_invoice/${encodeURIComponent(invoice)}`, {
+    const response = await fetch(`/api/steadfast/status_by_invoice/${encodeURIComponent(cleanInvoice)}`, {
       method: "GET",
       headers: {
         "Api-Key": apiKey,
@@ -170,25 +225,36 @@ export async function getSteadfastStatusByInvoice(
       },
     });
 
-    if (!response.ok && response.status === 404) {
-      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_invoice/${encodeURIComponent(invoice)}`, {
+    if (!response.ok && (response.status === 404 || response.status === 500)) {
+      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_invoice/${encodeURIComponent(cleanInvoice)}`, {
         method: "GET",
         headers: {
           "Api-Key": apiKey,
           "Secret-Key": secretKey,
         },
       });
-      return await directRes.json();
+      return await parseResponseJson(directRes);
     }
 
-    const data = await response.json();
+    const data = await parseResponseJson(response);
     return data;
   } catch (error: any) {
-    console.error("Steadfast getStatusByInvoice error:", error);
-    return {
-      status: 500,
-      message: error?.message || "Failed to check status by invoice",
-    };
+    try {
+      const directRes = await fetch(`${STEADFAST_BASE_URL}/status_by_invoice/${encodeURIComponent(cleanInvoice)}`, {
+        method: "GET",
+        headers: {
+          "Api-Key": apiKey,
+          "Secret-Key": secretKey,
+        },
+      });
+      return await parseResponseJson(directRes);
+    } catch (directErr: any) {
+      console.error("Steadfast getStatusByInvoice error:", error, directErr);
+      return {
+        status: 500,
+        message: error?.message || "Failed to check status by invoice",
+      };
+    }
   }
 }
 

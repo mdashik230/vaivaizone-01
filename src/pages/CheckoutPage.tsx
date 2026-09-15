@@ -12,6 +12,8 @@ import { useAuth } from "../context/AuthContext";
 import { sendTelegramNotification, escapeTelegramHtml } from "../utils/telegram";
 import { createSteadfastOrder, getSteadfastTrackingUrl } from "../utils/steadfast";
 import { createUddoktaPayCharge } from "../utils/uddoktapay";
+import { doc, onSnapshot } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 // Comprehensive location data for Bangladesh
 const BD_LOCATIONS = {
@@ -81,6 +83,22 @@ export default function CheckoutPage() {
   const [paymentDetails, setPaymentDetails] = useState({ trxId: "", last4: "" });
   const [isRedirectingPayment, setIsRedirectingPayment] = useState(false);
   const [gatewayRedirectUrl, setGatewayRedirectUrl] = useState<string | null>(null);
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+
+  // Auto-listen to the pending order status so if payment is completed in another tab, we automatically redirect
+  useEffect(() => {
+    if (!pendingOrderId) return;
+    const unsub = onSnapshot(doc(db, "orders", pendingOrderId), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data?.paymentStatus === 'paid' || data?.uddoktaPayStatus === 'COMPLETED') {
+          setIsRedirectingPayment(false);
+          navigate(`/payment-verify/${pendingOrderId}?status=COMPLETED`);
+        }
+      }
+    });
+    return () => unsub();
+  }, [pendingOrderId, navigate]);
 
   useEffect(() => {
     if (isUddoktaPayActive) {
@@ -192,6 +210,13 @@ export default function CheckoutPage() {
 
     try {
       const orderId = await addOrder(orderData);
+      setPendingOrderId(orderId);
+
+      // Save to storage for seamless recovery
+      try {
+        sessionStorage.setItem("last_uddoktapay_order_id", orderId);
+        localStorage.setItem("last_uddoktapay_order_id", orderId);
+      } catch (e) {}
 
       const charge = await createUddoktaPayCharge({
         fullName: String(formData.name),
@@ -201,13 +226,22 @@ export default function CheckoutPage() {
           order_id: orderId,
           phone: formData.phone,
         },
-        redirectUrl: `${window.location.origin}/payment-verify?order_id=${orderId}`,
-        cancelUrl: `${window.location.origin}/payment-verify?order_id=${orderId}&cancelled=true`,
+        redirectUrl: `${window.location.origin}/payment-verify/${orderId}`,
+        cancelUrl: `${window.location.origin}/payment-verify/${orderId}?cancelled=true`,
       }, uddoktaPaySettings);
 
       if (charge.payment_url) {
         clearCart();
         setGatewayRedirectUrl(charge.payment_url);
+
+        // Update order in Firestore with payment URL
+        try {
+          await updateOrder(orderId, {
+            paymentGatewayUrl: charge.payment_url,
+          });
+        } catch (updateErr) {
+          console.warn("Could not save paymentGatewayUrl to order:", updateErr);
+        }
 
         const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
         if (isInIframe) {
@@ -953,9 +987,21 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                     <ExternalLink size={18} />
                   </a>
 
+                  {pendingOrderId && (
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/payment-verify/${pendingOrderId}`)}
+                      className="inline-flex items-center justify-center gap-2 w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs shadow-lg shadow-emerald-600/20 active:scale-95 transition-all"
+                    >
+                      <CheckCircle2 size={16} />
+                      <span>{language === 'bn' ? "পেমেন্ট সম্পন্ন করেছেন? যাচাই করুন" : "Already Paid? Verify Now"}</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  )}
+
                   <div className="p-3 bg-amber-500/10 dark:bg-amber-500/5 rounded-xl border border-amber-500/20 text-left">
                     <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium leading-relaxed">
-                      💡 <strong>AI Studio তথ্য:</strong> গুগল AI Studio-এর প্রিভিউ স্ক্রিন একটি ফ্রেম (iFrame)-এর ভেতর থাকায় ব্যাংক ও গেটওয়ের সিকিউরিটি বিধিমালার কারণে নতুন ট্যাবে পেমেন্ট পেজ খুলতে হয়। লাইভ সাইটে সরাসরি রিডাইরেক্ট হবে।
+                      💡 <strong>পেমেন্ট নির্দেশনা:</strong> গেটওয়েতে অর্থ প্রদানের পর এই পেজ স্বয়ংক্রিয়ভাবে আপডেট হবে। যদি স্বয়ংক্রিয়ভাবে রিডাইরেক্ট না হয়, তবে উপরের <strong>"পেমেন্ট সম্পন্ন করেছেন? যাচাই করুন"</strong> বাটনে চাপ দিন।
                     </p>
                   </div>
                 </div>
@@ -971,7 +1017,7 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                   type="button"
                   onClick={() => {
                     setIsRedirectingPayment(false);
-                    navigate('/orders');
+                    navigate('/profile');
                   }}
                   className="text-xs font-bold text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
                 >
@@ -980,10 +1026,23 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                 <span className="text-neutral-300 dark:text-neutral-700">•</span>
                 <button
                   type="button"
-                  onClick={() => setIsRedirectingPayment(false)}
+                  onClick={async () => {
+                    if (pendingOrderId) {
+                      try {
+                        await updateOrder(pendingOrderId, {
+                          paymentMethod: 'Cash on Delivery',
+                          paymentStatus: 'unpaid',
+                          uddoktaPayStatus: 'switched_to_cod'
+                        });
+                      } catch (e) {}
+                    }
+                    setIsRedirectingPayment(false);
+                    setGatewayRedirectUrl(null);
+                    setPaymentMethod('cod');
+                  }}
                   className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors"
                 >
-                  {language === 'bn' ? "বাতিল" : "Close"}
+                  {language === 'bn' ? "ক্যাশ অন ডেলিভারিতে রূপান্তর / বাতিল" : "Switch to COD / Cancel"}
                 </button>
               </div>
             </motion.div>

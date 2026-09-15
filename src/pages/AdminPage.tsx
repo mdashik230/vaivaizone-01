@@ -221,23 +221,27 @@ export default function AdminPage() {
   };
 
   const handleTestSteadfast = async () => {
-    if (!localSteadfast?.apiKey || !localSteadfast?.secretKey) {
+    const apiKey = localSteadfast?.apiKey?.trim();
+    const secretKey = localSteadfast?.secretKey?.trim();
+    if (!apiKey || !secretKey) {
       showNotification('Steadfast API Key ও Secret Key প্রদান করুন', 'error');
       return;
     }
     setTestingSteadfast(true);
     try {
-      const res = await getSteadfastBalance({ apiKey: localSteadfast.apiKey, secretKey: localSteadfast.secretKey });
+      const res = await getSteadfastBalance({ apiKey, secretKey });
       if (res.status === 200 && typeof res.current_balance === 'number') {
         setSteadfastBalance(res.current_balance);
-        showNotification(`সংযোগ সফল! বর্তমান অ্যাকাউন্ট ব্যালেন্স: ৳${res.current_balance}`, 'success');
+        showNotification(`সংযোগ সফল! বর্তমান মার্চেন্ট ব্যালেন্স: ৳${res.current_balance}`, 'success');
       } else if (res.status === 200) {
-        showNotification('Steadfast API কানেক্টেড! ✅', 'success');
+        showNotification('Steadfast API সফলভাবে কানেক্টেড! ✅', 'success');
+      } else if (res.status === 401) {
+        showNotification('ভুল ক্রেডেনশিয়াল (Unauthorized): API Key বা Secret Key সঠিক নয়। দয়া করে পোর্টাল থেকে সঠিক কি কপি করুন।', 'error');
       } else {
         showNotification(res.message || 'Steadfast কানেকশন ব্যর্থ হয়েছে। কী ও সিক্রেট চেক করুন।', 'error');
       }
     } catch (err: any) {
-      showNotification('সংযোগ ব্যর্থ হয়েছে', 'error');
+      showNotification('Steadfast সার্ভারে সংযোগ ব্যর্থ হয়েছে: ' + (err?.message || 'Failed to fetch'), 'error');
     } finally {
       setTestingSteadfast(false);
     }
@@ -245,8 +249,15 @@ export default function AdminPage() {
 
   const handleSaveSteadfast = async () => {
     if (localSteadfast) {
-      await setSteadfastSettings(localSteadfast);
-      showNotification('স্টেডফাস্ট সেটিংস সফলভাবে সেভ করা হয়েছে');
+      const cleaned = {
+        ...localSteadfast,
+        apiKey: (localSteadfast.apiKey || '').trim(),
+        secretKey: (localSteadfast.secretKey || '').trim(),
+        isEnabled: localSteadfast.isEnabled !== undefined ? localSteadfast.isEnabled : Boolean(localSteadfast.apiKey?.trim()),
+      };
+      setLocalSteadfast(cleaned);
+      await setSteadfastSettings(cleaned);
+      showNotification('স্টেডফাস্ট সেটিংস সফলভাবে সেভ করা হয়েছে', 'success');
     }
   };
 
@@ -1018,11 +1029,11 @@ export default function AdminPage() {
               {localSteadfast?.isEnabled ? 'Active' : 'Disabled'}
             </span>
             <a 
-              href="https://portal.steadfast.com.bd" 
+              href="https://portal.packzy.com" 
               target="_blank" 
               rel="noreferrer" 
               className="p-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-primary rounded-xl transition-colors"
-              title="Steadfast Merchant Portal"
+              title="Steadfast / Packzy Merchant Portal"
             >
               <ExternalLink size={16} />
             </a>
@@ -1175,7 +1186,7 @@ export default function AdminPage() {
         <div className="space-y-3 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed font-medium">
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0 text-[10px]">১</span>
-            <p>প্রথমে <a href="https://portal.steadfast.com.bd" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Steadfast Merchant Portal</a> এ লগইন করুন।</p>
+            <p>প্রথমে <a href="https://portal.packzy.com" target="_blank" rel="noreferrer" className="text-primary font-bold underline">Steadfast / Packzy Merchant Portal</a> এ লগইন করুন।</p>
           </div>
           <div className="flex gap-3">
             <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold shrink-0 text-[10px]">২</span>
