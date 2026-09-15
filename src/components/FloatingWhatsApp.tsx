@@ -1,13 +1,15 @@
 import { MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
+import { useLocation } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 
 export default function FloatingWhatsApp() {
+  const { pathname } = useLocation();
   const { contactInfo } = useAdmin();
   const rawNumber = contactInfo.whatsappNumber || contactInfo.phone;
   const waNumber = rawNumber.replace(/[^0-9]/g, '');
   
-  if (!waNumber) return null;
+  if (pathname.startsWith('/admin') || !waNumber) return null;
 
   return (
     <motion.a

@@ -41,6 +41,10 @@ export default function BottomNav() {
     navigate(path);
   };
 
+  if (pathname.startsWith('/admin')) {
+    return null;
+  }
+
   return (
     <>
       {/* Bottom Nav Bar */}

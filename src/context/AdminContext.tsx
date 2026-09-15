@@ -3,7 +3,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, order
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { ALL_PRODUCTS, CATEGORY_DATA } from '../data';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
 import { sanitizeImageBase64 } from '../utils/imageCompressor';
 
 export interface TelegramSettings {
@@ -12,7 +12,7 @@ export interface TelegramSettings {
   isEnabled: boolean;
 }
 
-export type { SteadfastSettings };
+export type { SteadfastSettings, UddoktaPaySettings };
 
 export interface ContactInfo {
   phone: string;
@@ -49,6 +49,7 @@ interface AdminContextType {
   offers: Offer[];
   telegramSettings: TelegramSettings;
   steadfastSettings: SteadfastSettings;
+  uddoktaPaySettings: UddoktaPaySettings;
   sliders: Slider[];
   areas: Area[];
   shippingSettings: ShippingSettings;
@@ -59,6 +60,7 @@ interface AdminContextType {
   setShippingSettings: (settings: ShippingSettings) => void;
   setTelegramSettings: (settings: TelegramSettings) => void;
   setSteadfastSettings: (settings: SteadfastSettings) => Promise<void>;
+  setUddoktaPaySettings: (settings: UddoktaPaySettings) => Promise<void>;
   addSlider: (slider: Slider) => void;
   removeSlider: (id: string) => void;
   updateSlider: (id: string, data: Partial<Slider>) => void;
@@ -101,6 +103,15 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [steadfastSettings, setSteadfastSettingsState] = useState<SteadfastSettings>({
     apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care"
   });
+  const [uddoktaPaySettings, setUddoktaPaySettingsState] = useState<UddoktaPaySettings>(() => {
+    try {
+      const cached = localStorage.getItem("uddoktaPaySettings");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return {
+      apiKey: "", apiUrl: "https://sandbox.uddoktapay.com", isEnabled: false, isSandbox: true
+    };
+  });
 
   // Fetch data from Firestore
   useEffect(() => {
@@ -139,6 +150,22 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (data.shippingSettings) setShippingSettingsState(data.shippingSettings);
         if (data.telegramSettings) setTelegramSettingsState(data.telegramSettings);
         if (data.steadfastSettings) setSteadfastSettingsState(data.steadfastSettings);
+        if (data.uddoktaPaySettings) {
+          const loadedPay: UddoktaPaySettings = {
+            apiKey: data.uddoktaPaySettings.apiKey || "",
+            apiUrl: data.uddoktaPaySettings.apiUrl || "https://sandbox.uddoktapay.com",
+            // If apiKey is present, activate by default unless explicitly disabled
+            isEnabled: data.uddoktaPaySettings.isEnabled !== undefined 
+              ? data.uddoktaPaySettings.isEnabled 
+              : Boolean(data.uddoktaPaySettings.apiKey),
+            isSandbox: data.uddoktaPaySettings.isSandbox ?? true,
+            allowManualFallback: data.uddoktaPaySettings.allowManualFallback ?? false,
+          };
+          setUddoktaPaySettingsState(loadedPay);
+          try {
+            localStorage.setItem("uddoktaPaySettings", JSON.stringify(loadedPay));
+          } catch {}
+        }
         if (data.sliders) setSliders(data.sliders);
         if (data.areas) setAreas(data.areas);
       } else if (isAdmin) {
@@ -154,6 +181,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           shippingSettings: { freeDeliveryThreshold: 2000, defaultFee: 60, insideDhakaFee: 60, outsideDhakaFee: 120 },
           telegramSettings: { botToken: "", chatId: "", isEnabled: false },
           steadfastSettings: { apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care" },
+          uddoktaPaySettings: { apiKey: "", apiUrl: "https://sandbox.uddoktapay.com", isEnabled: false, isSandbox: true },
           sliders: [
             { id: "1", image: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=1200", title: "New Season Style" },
             { id: "2", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=1200", title: "Smart Gadgets Edition" }
@@ -178,7 +206,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isAdmin, loading]);
 
   const updateConfig = (update: any) => {
-    return updateDoc(doc(db, "configs", "main"), update);
+    return setDoc(doc(db, "configs", "main"), update, { merge: true });
   };
 
   const setScrollingMessage = (msg: string) => updateConfig({ scrollingMessage: msg });
@@ -186,6 +214,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setShippingSettings = (settings: ShippingSettings) => updateConfig({ shippingSettings: settings });
   const setTelegramSettings = (settings: TelegramSettings) => updateConfig({ telegramSettings: settings });
   const setSteadfastSettings = (settings: SteadfastSettings) => updateConfig({ steadfastSettings: settings });
+  const setUddoktaPaySettings = async (settings: UddoktaPaySettings) => {
+    setUddoktaPaySettingsState(settings);
+    try {
+      localStorage.setItem("uddoktaPaySettings", JSON.stringify(settings));
+    } catch {}
+    await updateConfig({ uddoktaPaySettings: settings });
+  };
 
   const sanitizeCategoryData = async (cat: Partial<Category>): Promise<Partial<Category>> => {
     const clean = { ...cat };
@@ -280,8 +315,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   return (
     <AdminContext.Provider value={{
-      products, categories, offers, telegramSettings, steadfastSettings, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
-      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings,
+      products, categories, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
+      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings,
       addProduct, updateProduct, removeProduct,
       addCategory, updateCategory, removeCategory,
       addOffer, updateOffer, removeOffer,

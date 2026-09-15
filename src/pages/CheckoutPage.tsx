@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ChevronLeft, Truck, MapPin, Phone, User, CreditCard, ShieldCheck, AlertCircle, CheckCircle2, ShoppingCart, Ban } from "lucide-react";
+import { ChevronLeft, Truck, MapPin, Phone, User, CreditCard, ShieldCheck, AlertCircle, CheckCircle2, ShoppingCart, Ban, Zap, Loader2, ArrowRight, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import Header from "../components/Header";
@@ -11,6 +11,7 @@ import { useAdmin } from "../context/AdminContext";
 import { useAuth } from "../context/AuthContext";
 import { sendTelegramNotification, escapeTelegramHtml } from "../utils/telegram";
 import { createSteadfastOrder, getSteadfastTrackingUrl } from "../utils/steadfast";
+import { createUddoktaPayCharge } from "../utils/uddoktapay";
 
 // Comprehensive location data for Bangladesh
 const BD_LOCATIONS = {
@@ -47,10 +48,15 @@ const SPECIAL_AREAS = ["বড়িবাড়ী", "কপালেশ্বহর"
 export default function CheckoutPage() {
   const { cart, clearCart } = useCart();
   const { language, t } = useSettings();
-  const { contactInfo, shippingSettings, telegramSettings, steadfastSettings } = useAdmin();
+  const { contactInfo, shippingSettings, telegramSettings, steadfastSettings, uddoktaPaySettings } = useAdmin();
   const navigate = useNavigate();
   const { addOrder, orders, updateOrder } = useOrders();
   const { user } = useAuth();
+
+  const isUddoktaPayActive = Boolean(
+    uddoktaPaySettings?.apiKey?.trim() && 
+    (uddoktaPaySettings.isEnabled !== false || (uddoktaPaySettings.apiKey && uddoktaPaySettings.apiKey.length > 8))
+  );
 
   // Find the most recent address from previous orders
   const lastOrderWithAddress = orders.find(o => o.customerInfo && o.customerInfo.address);
@@ -68,10 +74,21 @@ export default function CheckoutPage() {
   });
 
   const [paymentMethod, setPaymentMethod] = useState<"online" | "cod">("online");
+  const [onlineMode, setOnlineMode] = useState<"gateway" | "manual">("gateway");
   const [onlineProvider, setOnlineProvider] = useState<"bkash" | "nagad" | "rocket" | "">("");
   const [showSuccess, setShowSuccess] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState({ trxId: "", last4: "" });
+  const [isRedirectingPayment, setIsRedirectingPayment] = useState(false);
+  const [gatewayRedirectUrl, setGatewayRedirectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isUddoktaPayActive) {
+      setOnlineMode("gateway");
+    } else {
+      setOnlineMode("manual");
+    }
+  }, [isUddoktaPayActive]);
 
   useEffect(() => {
     if (showSuccess) {
@@ -124,15 +141,99 @@ export default function CheckoutPage() {
       return;
     }
 
-    if (paymentMethod === "online" && !onlineProvider) {
-      alert(language === 'bn' ? "দয়া করে একটি অনলাইন পেমেন্ট মাধ্যম নির্বাচন করুন" : "Please select an online payment provider");
+    if (paymentMethod === "online") {
+      if (isUddoktaPayActive && (onlineMode === "gateway" || !uddoktaPaySettings?.allowManualFallback)) {
+        processOnlineGatewayOrder();
+      } else {
+        if (!onlineProvider) {
+          alert(language === 'bn' ? "দয়া করে একটি অনলাইন পেমেন্ট মাধ্যম নির্বাচন করুন" : "Please select an online payment provider");
+          return;
+        }
+        setShowPaymentModal(true);
+      }
+    } else {
+      processOrder();
+    }
+  };
+
+  const processOnlineGatewayOrder = async () => {
+    if (!formData.name?.trim() || !formData.phone?.trim() || !formData.address?.trim() || !formData.division || !formData.district) {
+      alert(language === 'bn' 
+        ? "দয়া করে নাম, ফোন নম্বর, বিভাগ, জেলা এবং সম্পূর্ণ ঠিকানা পূরণ করুন" 
+        : "Please fill in name, phone number, division, district, and address");
       return;
     }
 
-    if (paymentMethod === "online") {
-      setShowPaymentModal(true);
-    } else {
-      processOrder();
+    setIsRedirectingPayment(true);
+
+    const orderData: Omit<Order, 'id'> = {
+      date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }),
+      status: 'Pending',
+      paymentStatus: 'unpaid',
+      total: Number(total),
+      deliveryFee: Number(deliveryFee),
+      serviceCharge: 0,
+      items: cart.map(item => ({
+        id: String(item.id),
+        name: String(item.name || "Product"),
+        price: Number(item.price) || 0,
+        quantity: Number(item.quantity) || 1,
+        image: String(item.image || "https://placehold.co/100")
+      })),
+      customerInfo: {
+        name: String(formData.name),
+        phone: String(formData.phone),
+        address: String(formData.address),
+        area: String(`${formData.upazila || ""}, ${formData.district}, ${formData.division}`)
+      },
+      paymentMethod: 'UddoktaPay (Online Auto)',
+      uddoktaPayStatus: 'pending',
+    };
+
+    try {
+      const orderId = await addOrder(orderData);
+
+      const charge = await createUddoktaPayCharge({
+        fullName: String(formData.name),
+        email: user?.email || (formData.phone ? `${formData.phone}@customer.local` : 'customer@example.com'),
+        amount: total,
+        metadata: {
+          order_id: orderId,
+          phone: formData.phone,
+        },
+        redirectUrl: `${window.location.origin}/payment-verify?order_id=${orderId}`,
+        cancelUrl: `${window.location.origin}/payment-verify?order_id=${orderId}&cancelled=true`,
+      }, uddoktaPaySettings);
+
+      if (charge.payment_url) {
+        clearCart();
+        setGatewayRedirectUrl(charge.payment_url);
+
+        const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+        if (isInIframe) {
+          // Inside AI Studio iframe: UddoktaPay/Paymently blocks iframe embedding via X-Frame-Options: SAMEORIGIN
+          // We immediately attempt to open in a new tab, and our interactive modal will be available as well
+          try {
+            const popup = window.open(charge.payment_url, '_blank', 'noopener,noreferrer');
+            if (!popup) {
+              console.log("Popup blocked by browser; user can click the button in modal.");
+            }
+          } catch (e) {
+            console.warn("Could not auto-open new tab from iframe:", e);
+          }
+        } else {
+          // In standard standalone tab or live domain, redirect directly
+          window.location.href = charge.payment_url;
+        }
+      } else {
+        throw new Error(charge.message || "Failed to get payment gateway URL");
+      }
+    } catch (err: any) {
+      console.error("UddoktaPay checkout error:", err);
+      alert(language === 'bn' 
+        ? `পেমেন্ট গেটওয়েতে সংযোগ করতে সমস্যা হয়েছে: ${err.message || 'দয়া করে আবার চেষ্টা করুন'}` 
+        : `Payment Gateway error: ${err.message || 'Please try again'}`);
+      setIsRedirectingPayment(false);
     }
   };
 
@@ -482,11 +583,16 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                     }`}
                   >
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${paymentMethod === "online" ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400"}`}>
-                      <ShieldCheck size={24} />
+                      <Zap size={24} />
                     </div>
                     <div>
-                      <p className="font-bold">{language === 'bn' ? "অনলাইন পেমেন্ট" : "Online Payment"}</p>
-                      <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">{language === 'bn' ? "বিকাশ, নগদ, রকেট" : "bKash, Nagad, Rocket"}</p>
+                      <p className="font-bold flex items-center gap-1.5">
+                        {language === 'bn' ? "অনলাইন পেমেন্ট" : "Online Payment"}
+                        {isUddoktaPayActive && (
+                          <span className="text-[9px] bg-primary text-white font-black px-2 py-0.5 rounded-md uppercase tracking-wider">Auto</span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">{language === 'bn' ? "বিকাশ, নগদ, রকেট, কার্ড" : "bKash, Nagad, Rocket, Cards"}</p>
                     </div>
                     {paymentMethod === "online" && <CheckCircle2 size={20} className="ml-auto text-primary" />}
                   </div>
@@ -517,34 +623,106 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="overflow-hidden"
+                      className="overflow-hidden space-y-4"
                     >
-                      <div className="grid grid-cols-3 gap-4 pt-2">
-                        {[
-                          { id: "bkash", color: "bg-[#D12053]", label: "bKash" },
-                          { id: "nagad", color: "bg-[#F7941D]", label: "Nagad" },
-                          { id: "rocket", color: "bg-[#8C3494]", label: "Rocket" }
-                        ].map(provider => (
+                      {/* Gateway vs Manual toggle if manual fallback is enabled */}
+                      {isUddoktaPayActive && uddoktaPaySettings?.allowManualFallback && (
+                        <div className="flex gap-2 p-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-2xl">
                           <button
-                            key={provider.id}
                             type="button"
-                            onClick={() => setOnlineProvider(provider.id as any)}
-                            className={`p-4 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 relative overflow-hidden group ${
-                              onlineProvider === provider.id ? "border-primary bg-primary/5 ring-4 ring-primary/5 shadow-inner" : "border-neutral-100 dark:border-neutral-800 hover:border-neutral-200"
+                            onClick={() => setOnlineMode("gateway")}
+                            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                              onlineMode === "gateway" 
+                                ? "bg-white dark:bg-neutral-900 text-primary shadow-sm" 
+                                : "text-neutral-500 hover:text-neutral-800"
                             }`}
                           >
-                            <div className={`w-12 h-12 ${provider.color} rounded-2xl flex items-center justify-center text-white font-black text-xs shadow-md group-hover:scale-110 transition-transform`}>
-                              {provider.label[0]}
-                            </div>
-                            <span className="text-[10px] font-black uppercase tracking-widest">{provider.label}</span>
-                            {onlineProvider === provider.id && (
-                              <div className="absolute top-0 right-0 p-1.5 bg-primary text-white rounded-bl-xl shadow-lg">
-                                <CheckCircle2 size={12} />
-                              </div>
-                            )}
+                            <Zap size={14} />
+                            <span>{language === 'bn' ? "অটোমেটিক গেটওয়ে (Auto Verify)" : "Automated Gateway"}</span>
                           </button>
-                        ))}
-                      </div>
+                          <button
+                            type="button"
+                            onClick={() => setOnlineMode("manual")}
+                            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                              onlineMode === "manual" 
+                                ? "bg-white dark:bg-neutral-900 text-primary shadow-sm" 
+                                : "text-neutral-500 hover:text-neutral-800"
+                            }`}
+                          >
+                            <CreditCard size={14} />
+                            <span>{language === 'bn' ? "ম্যানুয়াল সেন্ড মানি" : "Manual Send Money"}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Automated UddoktaPay View */}
+                      {isUddoktaPayActive && onlineMode === "gateway" ? (
+                        <div className="p-6 rounded-3xl bg-gradient-to-br from-primary/5 via-primary/[0.02] to-transparent border border-primary/20 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-primary font-black text-sm">
+                              <ShieldCheck size={18} />
+                              <span>{language === 'bn' ? "UddoktaPay সুরক্ষিত গেটওয়ে" : "UddoktaPay Secure Gateway"}</span>
+                            </div>
+                            <span className="text-[10px] font-black uppercase text-green-600 bg-green-50 dark:bg-green-500/10 px-2.5 py-1 rounded-full">
+                              {language === 'bn' ? "তাত্ক্ষণিক অটো ভেরিফাই" : "Instant Auto Verify"}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed font-medium">
+                            {language === 'bn' 
+                              ? "অর্ডার কনফার্ম করার পর আপনাকে UddoktaPay-এর সুরক্ষিত পেমেন্ট পেজে নেওয়া হবে। সেখানে বিকাশ, নগদ, রকেট বা কার্ডের মাধ্যমে পেমেন্ট করলেই সাথে সাথে অর্ডার অটো ভেরিফাই হয়ে যাবে।" 
+                              : "After confirming, you will be redirected to the secure UddoktaPay portal. Payment via bKash, Nagad, Rocket or Cards will automatically verify instantly."}
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <div className="px-3 py-1.5 rounded-xl bg-[#D12053] text-white text-[11px] font-black tracking-wide shadow-sm">
+                              bKash
+                            </div>
+                            <div className="px-3 py-1.5 rounded-xl bg-[#F7941D] text-white text-[11px] font-black tracking-wide shadow-sm">
+                              Nagad
+                            </div>
+                            <div className="px-3 py-1.5 rounded-xl bg-[#8C3494] text-white text-[11px] font-black tracking-wide shadow-sm">
+                              Rocket
+                            </div>
+                            <div className="px-3 py-1.5 rounded-xl bg-neutral-900 dark:bg-neutral-800 text-white text-[11px] font-black tracking-wide shadow-sm">
+                              Visa / Master
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Manual Payment Provider View */
+                        <div className="space-y-3">
+                          <p className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                            {language === 'bn' ? "পেমেন্ট মাধ্যম সিলেক্ট করুন:" : "Select Payment Method:"}
+                          </p>
+                          <div className="grid grid-cols-3 gap-4">
+                            {[
+                              { id: "bkash", color: "bg-[#D12053]", label: "bKash" },
+                              { id: "nagad", color: "bg-[#F7941D]", label: "Nagad" },
+                              { id: "rocket", color: "bg-[#8C3494]", label: "Rocket" }
+                            ].map(provider => (
+                              <button
+                                key={provider.id}
+                                type="button"
+                                onClick={() => setOnlineProvider(provider.id as any)}
+                                className={`p-4 rounded-3xl border-2 transition-all flex flex-col items-center gap-3 relative overflow-hidden group ${
+                                  onlineProvider === provider.id ? "border-primary bg-primary/5 ring-4 ring-primary/5 shadow-inner" : "border-neutral-100 dark:border-neutral-800 hover:border-neutral-200"
+                                }`}
+                              >
+                                <div className={`w-12 h-12 ${provider.color} rounded-2xl flex items-center justify-center text-white font-black text-xs shadow-md group-hover:scale-110 transition-transform`}>
+                                  {provider.label[0]}
+                                </div>
+                                <span className="text-[10px] font-black uppercase tracking-widest">{provider.label}</span>
+                                {onlineProvider === provider.id && (
+                                  <div className="absolute top-0 right-0 p-1.5 bg-primary text-white rounded-bl-xl shadow-lg">
+                                    <CheckCircle2 size={12} />
+                                  </div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -592,15 +770,39 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
 
                 <button 
                   type="submit"
-                  disabled={isMixedCart}
+                  disabled={isMixedCart || isRedirectingPayment}
                   className={`w-full py-5 rounded-[1.5rem] font-black text-lg shadow-lg flex items-center justify-center gap-3 group transition-all ${
-                    isMixedCart 
-                      ? "bg-neutral-100 text-neutral-400 cursor-not-allowed shadow-none" 
+                    isMixedCart || isRedirectingPayment
+                      ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed shadow-none" 
                       : "bg-primary text-white shadow-primary/20 hover:scale-[1.02] active:scale-95"
                   }`}
                 >
-                  {isMixedCart ? <Ban size={24} /> : <ShieldCheck size={24} className="group-hover:rotate-12 transition-transform" />}
-                  {language === 'bn' ? "অর্ডার কনফার্ম করুন" : "Confirm Order"}
+                  {isRedirectingPayment ? (
+                    <>
+                      <Loader2 size={24} className="animate-spin text-primary" />
+                      <span>{language === 'bn' ? "পেমেন্ট গেটওয়েতে নেওয়া হচ্ছে..." : "Redirecting to Payment..."}</span>
+                    </>
+                  ) : isMixedCart ? (
+                    <>
+                      <Ban size={24} />
+                      <span>{language === 'bn' ? "অর্ডার সম্ভব নয়" : "Cannot Order"}</span>
+                    </>
+                  ) : (
+                    <>
+                      {paymentMethod === 'online' && isUddoktaPayActive && onlineMode === 'gateway' ? (
+                        <>
+                          <Zap size={24} className="group-hover:scale-110 transition-transform text-amber-300" />
+                          <span>{language === 'bn' ? "পেমেন্ট করুন ও কনফার্ম করুন" : "Pay & Confirm Order"}</span>
+                          <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform ml-1" />
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={24} className="group-hover:rotate-12 transition-transform" />
+                          <span>{language === 'bn' ? "অর্ডার কনফার্ম করুন" : "Confirm Order"}</span>
+                        </>
+                      )}
+                    </>
+                  )}
                 </button>
 
                 <div className="mt-8 p-6 rounded-3xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-700">
@@ -709,6 +911,81 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+        {/* Gateway Redirecting Overlay */}
+        {isRedirectingPayment && (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-white dark:bg-neutral-900 rounded-[2.5rem] p-7 sm:p-9 max-w-md w-full text-center space-y-5 shadow-2xl border border-neutral-100 dark:border-neutral-800 relative"
+            >
+              <div className="w-16 h-16 rounded-3xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                <ShieldCheck size={36} />
+              </div>
+              
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-black">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  {language === 'bn' ? "পেমেন্ট সেশন প্রস্তুত" : "Payment Session Ready"}
+                </div>
+                <h3 className="text-xl font-black text-neutral-900 dark:text-white">
+                  {language === 'bn' ? "অনলাইন পেমেন্ট গেটওয়ে" : "Online Payment Gateway"}
+                </h3>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium leading-relaxed">
+                  {language === 'bn' 
+                    ? "নিরাপদ পেমেন্ট গেটওয়েতে প্রবেশ করতে নিচের বাটনে চাপ দিন (bKash, Nagad, Rocket, Cards):" 
+                    : "Click below to proceed to the secure payment page (bKash, Nagad, Rocket, Cards):"}
+                </p>
+              </div>
+
+              {gatewayRedirectUrl ? (
+                <div className="space-y-3 pt-2">
+                  <a 
+                    href={gatewayRedirectUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 w-full py-4.5 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/25 hover:bg-primary/95 active:scale-95 transition-all"
+                  >
+                    <span>{language === 'bn' ? "পেমেন্ট করতে ক্লিক করুন" : "Click to Complete Payment"}</span>
+                    <ExternalLink size={18} />
+                  </a>
+
+                  <div className="p-3 bg-amber-500/10 dark:bg-amber-500/5 rounded-xl border border-amber-500/20 text-left">
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium leading-relaxed">
+                      💡 <strong>AI Studio তথ্য:</strong> গুগল AI Studio-এর প্রিভিউ স্ক্রিন একটি ফ্রেম (iFrame)-এর ভেতর থাকায় ব্যাংক ও গেটওয়ের সিকিউরিটি বিধিমালার কারণে নতুন ট্যাবে পেমেন্ট পেজ খুলতে হয়। লাইভ সাইটে সরাসরি রিডাইরেক্ট হবে।
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2 py-4 text-neutral-400 text-xs font-bold">
+                  <Loader2 size={18} className="animate-spin text-primary" />
+                  <span>{language === 'bn' ? "পেমেন্ট লিংক তৈরি হচ্ছে..." : "Generating payment link..."}</span>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRedirectingPayment(false);
+                    navigate('/orders');
+                  }}
+                  className="text-xs font-bold text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                >
+                  {language === 'bn' ? "আমার অর্ডারসমূহ দেখুন" : "View My Orders"}
+                </button>
+                <span className="text-neutral-300 dark:text-neutral-700">•</span>
+                <button
+                  type="button"
+                  onClick={() => setIsRedirectingPayment(false)}
+                  className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors"
+                >
+                  {language === 'bn' ? "বাতিল" : "Close"}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

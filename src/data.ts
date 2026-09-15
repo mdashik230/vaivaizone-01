@@ -3,11 +3,11 @@ import React from 'react';
 import { Product } from './types';
 
 export const ALL_PRODUCTS: Product[] = [
-  { id: "1", name: "Premium Smartphone X", price: 85000, category: "Smartphones", image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&q=80&w=400" },
-  { id: "2", name: "Super AMOLED Phone", price: 45000, category: "Smartphones", image: "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&q=80&w=400" },
-  { id: "3", name: "Sport Smartwatch Pro", price: 5500, category: "Smartwatches", image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400" },
-  { id: "4", name: "Noise Cancelling Headphones", price: 12000, category: "Headphones", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400" },
-  { id: "5", name: "Ultra Power Bank 20k", price: 3500, category: "Power Banks", image: "https://images.unsplash.com/photo-1609592424109-dd0369877478?auto=format&fit=crop&q=80&w=400" },
+  { id: "1", name: "Premium Smartphone X", price: 85000, category: "Smartphones", image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&q=80&w=400", stock: 12 },
+  { id: "2", name: "Super AMOLED Phone", price: 45000, category: "Smartphones", image: "https://images.unsplash.com/photo-1598327105666-5b89351aff97?auto=format&fit=crop&q=80&w=400", stock: 18 },
+  { id: "3", name: "Sport Smartwatch Pro", price: 5500, category: "Smartwatches", image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400", stock: 25 },
+  { id: "4", name: "Noise Cancelling Headphones", price: 12000, category: "Headphones", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400", stock: 15 },
+  { id: "5", name: "Ultra Power Bank 20k", price: 3500, category: "Power Banks", image: "https://images.unsplash.com/photo-1609592424109-dd0369877478?auto=format&fit=crop&q=80&w=400", stock: 30 },
   { 
     id: "6", 
     name: "Modern Denim Jeans", 
@@ -22,7 +22,8 @@ export const ALL_PRODUCTS: Product[] = [
       "https://images.unsplash.com/photo-1475178626620-a4d074967452?auto=format&fit=crop&q=80&w=400"
     ],
     colors: ["Black", "Blue", "Gray"],
-    sizes: ["30", "32", "34", "36"]
+    sizes: ["30", "32", "34", "36"],
+    stock: 20
   },
   { 
     id: "7", 
@@ -37,15 +38,16 @@ export const ALL_PRODUCTS: Product[] = [
       "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?auto=format&fit=crop&q=80&w=400"
     ],
     colors: ["Pink", "Yellow", "White"],
-    sizes: ["S", "M", "L"]
+    sizes: ["S", "M", "L"],
+    stock: 14
   },
   // Adding products from FeaturedProducts
-  { id: "101", name: "Noise ColorFit Pulse Grand", price: 1850, originalPrice: 2500, image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400", category: "Smartwatches", discount: "26% Off", isNew: true },
-  { id: "102", name: "Classic Denim Jacket", price: 3200, originalPrice: 4000, image: "https://images.unsplash.com/photo-1576905066962-18e001767664?auto=format&fit=crop&q=80&w=400", category: "Men's Wear", discount: "20% Off" },
-  { id: "104", name: "Bluetooth Wireless Mouse", price: 850, originalPrice: 1200, image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?auto=format&fit=crop&q=80&w=400", category: "Gadgets", isNew: true },
-  { id: "105", name: "Premium Cotton T-Shirt", price: 1200, image: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&q=80&w=400", category: "Men's Wear" },
-  { id: "107", name: "JBL Flip 6 Speaker", price: 8500, originalPrice: 10500, image: "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&q=80&w=400", category: "Gadgets", discount: "Best Seller" },
-  { id: "108", name: "Casual Sneakers", price: 4500, image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=400", category: "Footwear", isNew: true },
+  { id: "101", name: "Noise ColorFit Pulse Grand", price: 1850, originalPrice: 2500, image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400", category: "Smartwatches", discount: "26% Off", isNew: true, stock: 22 },
+  { id: "102", name: "Classic Denim Jacket", price: 3200, originalPrice: 4000, image: "https://images.unsplash.com/photo-1576905066962-18e001767664?auto=format&fit=crop&q=80&w=400", category: "Men's Wear", discount: "20% Off", stock: 16 },
+  { id: "104", name: "Bluetooth Wireless Mouse", price: 850, originalPrice: 1200, image: "https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?auto=format&fit=crop&q=80&w=400", category: "Gadgets", isNew: true, stock: 40 },
+  { id: "105", name: "Premium Cotton T-Shirt", price: 1200, image: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&q=80&w=400", category: "Men's Wear", stock: 35 },
+  { id: "107", name: "JBL Flip 6 Speaker", price: 8500, originalPrice: 10500, image: "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&q=80&w=400", category: "Gadgets", discount: "Best Seller", stock: 10 },
+  { id: "108", name: "Casual Sneakers", price: 4500, image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=400", category: "Footwear", isNew: true, stock: 15 },
 ];
 
 export const CATEGORY_DATA: Record<string, any> = {

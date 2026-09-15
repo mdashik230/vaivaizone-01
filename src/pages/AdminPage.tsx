@@ -8,7 +8,7 @@ import {
   Save, X, ChevronRight, ChevronDown, Package, DollarSign, Users,
   Globe, Mail, MapPin, CreditCard, Camera, Menu, Lock,
   Shirt, ShoppingBasket, ImagePlus, Truck, Printer, Store,
-  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, RefreshCw
+  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, RefreshCw, Search, Calculator, AlertCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
@@ -18,7 +18,7 @@ import { sendTelegramNotification } from '../utils/telegram';
 import { useOrders, Order } from '../context/OrderContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
 import { 
   createSteadfastOrder, 
   getSteadfastBalance, 
@@ -26,11 +26,36 @@ import {
   formatSteadfastStatus, 
   getSteadfastTrackingUrl 
 } from '../utils/steadfast';
+import { 
+  testUddoktaPayConnection, 
+  normalizeUddoktaPayUrl,
+  DEFAULT_SANDBOX_KEY, 
+  DEFAULT_SANDBOX_URL 
+} from '../utils/uddoktapay';
 import { compressImageFile } from '../utils/imageCompressor';
 import PageTransition from "../components/PageTransition";
 import { LogOut } from 'lucide-react';
 
-type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'messages' | 'telegram' | 'steadfast' | 'users' | 'social-links';
+type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'messages' | 'telegram' | 'steadfast' | 'payment-gateway' | 'users' | 'social-links';
+
+const parseSafePrice = (price: any): number => {
+  if (typeof price === 'number') return isNaN(price) ? 0 : Math.max(0, price);
+  if (!price) return 0;
+  const cleaned = String(price).replace(/[^0-9.]/g, '');
+  const val = parseFloat(cleaned);
+  return isNaN(val) ? 0 : Math.max(0, val);
+};
+
+const getSafeStock = (p: Partial<Product> | undefined): number => {
+  if (!p) return 0;
+  if (typeof p.stock === 'number') return isNaN(p.stock) ? 0 : Math.max(0, Math.floor(p.stock));
+  if (p.stock !== undefined && p.stock !== null && String(p.stock).trim() !== '') {
+    const cleaned = String(p.stock).replace(/[^0-9]/g, '');
+    const parsed = parseInt(cleaned, 10);
+    if (!isNaN(parsed)) return Math.max(0, parsed);
+  }
+  return 0; // Default to 0, strictly no phantom items!
+};
 
 export default function AdminPage() {
   const navigate = useNavigate();
@@ -54,12 +79,12 @@ export default function AdminPage() {
   }, [isAdmin]);
   
   const { 
-    products, categories, sliders, offers, telegramSettings, steadfastSettings, scrollingMessage, contactInfo, shippingSettings,
+    products, categories, sliders, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, scrollingMessage, contactInfo, shippingSettings,
     setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider,
     addProduct, updateProduct, removeProduct, 
     addCategory, updateCategory, removeCategory,
     addOffer, updateOffer, removeOffer,
-    setShippingSettings, setTelegramSettings, setSteadfastSettings
+    setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings
   } = useAdmin();
   const { orders, updateOrderStatus, updateOrder } = useOrders();
   const { language } = useSettings();
@@ -80,6 +105,7 @@ export default function AdminPage() {
 
   const [localTelegram, setLocalTelegram] = useState<TelegramSettings | null>(null);
   const [localSteadfast, setLocalSteadfast] = useState<SteadfastSettings | null>(null);
+  const [localUddoktaPay, setLocalUddoktaPay] = useState<UddoktaPaySettings | null>(null);
   const [localContactInfo, setLocalContactInfo] = useState<ContactInfo | null>(null);
   const [localShippingSettings, setLocalShippingSettings] = useState<ShippingSettings | null>(null);
   const [localScrollingMessage, setLocalScrollingMessage] = useState<string>('');
@@ -89,6 +115,52 @@ export default function AdminPage() {
   const [showSteadfastApiKey, setShowSteadfastApiKey] = useState(false);
   const [showSteadfastSecretKey, setShowSteadfastSecretKey] = useState(false);
 
+  // UddoktaPay States
+  const [testingUddoktaPay, setTestingUddoktaPay] = useState(false);
+  const [uddoktaPayTestResult, setUddoktaPayTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showUddoktaPayApiKey, setShowUddoktaPayApiKey] = useState(false);
+
+  // User Management Search State
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  // Stock Audit & Breakdown Modal States
+  const [showStockModal, setShowStockModal] = useState(false);
+  const [stockSearchQuery, setStockSearchQuery] = useState('');
+  const [stockFilter, setStockFilter] = useState<'all' | 'in_stock' | 'out_of_stock'>('all');
+  const [quickStockValues, setQuickStockValues] = useState<Record<string, string>>({});
+  const [savingStockId, setSavingStockId] = useState<string | null>(null);
+  const [isBulkFixingStock, setIsBulkFixingStock] = useState(false);
+
+  const filteredStockProducts = products.filter(p => {
+    const matchesSearch = !stockSearchQuery.trim() || 
+      p.name.toLowerCase().includes(stockSearchQuery.toLowerCase()) ||
+      (categories[p.category]?.name || p.category || '').toLowerCase().includes(stockSearchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    const s = getSafeStock(p);
+    if (stockFilter === 'in_stock') return s > 0;
+    if (stockFilter === 'out_of_stock') return s === 0;
+    return true;
+  });
+
+  const handleBulkSetZeroStock = async () => {
+    const undefinedStockProducts = products.filter(p => p.stock === undefined || p.stock === null || String(p.stock).trim() === '');
+    if (undefinedStockProducts.length === 0) {
+      showNotification('সব পণ্যের স্টক ইতিমধ্যে নির্ধারিত আছে');
+      return;
+    }
+    setIsBulkFixingStock(true);
+    try {
+      for (const p of undefinedStockProducts) {
+        await updateProduct({ ...p, stock: 0 });
+      }
+      showNotification(`${undefinedStockProducts.length} টি পণ্যের স্টক ০ তে সেট করা হয়েছে`);
+    } catch (err) {
+      showNotification('স্টক আপডেট করতে সমস্যা হয়েছে', 'error');
+    } finally {
+      setIsBulkFixingStock(false);
+    }
+  };
+
   const [dispatchingOrder, setDispatchingOrder] = useState<Order | null>(null);
   const [dispatchForm, setDispatchForm] = useState({ name: '', phone: '', address: '', codAmount: 0, note: '' });
   const [isDispatching, setIsDispatching] = useState(false);
@@ -97,10 +169,56 @@ export default function AdminPage() {
   useEffect(() => {
     if (telegramSettings && !localTelegram) setLocalTelegram(telegramSettings);
     if (steadfastSettings && !localSteadfast) setLocalSteadfast(steadfastSettings);
+    if (uddoktaPaySettings && !localUddoktaPay) setLocalUddoktaPay(uddoktaPaySettings);
     if (contactInfo && !localContactInfo) setLocalContactInfo(contactInfo);
     if (shippingSettings && !localShippingSettings) setLocalShippingSettings(shippingSettings);
     if (scrollingMessage && !localScrollingMessage) setLocalScrollingMessage(scrollingMessage);
-  }, [telegramSettings, steadfastSettings, contactInfo, shippingSettings, scrollingMessage]);
+  }, [telegramSettings, steadfastSettings, uddoktaPaySettings, contactInfo, shippingSettings, scrollingMessage]);
+
+  const handleTestUddoktaPay = async () => {
+    if (!localUddoktaPay?.apiKey) {
+      showNotification('দয়া করে UddoktaPay API Key প্রদান করুন', 'error');
+      return;
+    }
+    setTestingUddoktaPay(true);
+    setUddoktaPayTestResult(null);
+    try {
+      const res = await testUddoktaPayConnection(localUddoktaPay);
+      setUddoktaPayTestResult(res);
+      if (res.success) {
+        showNotification(res.message, 'success');
+      } else {
+        showNotification(res.message, 'error');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'কানেকশন টেস্ট ব্যর্থ হয়েছে';
+      setUddoktaPayTestResult({ success: false, message: msg });
+      showNotification(msg, 'error');
+    } finally {
+      setTestingUddoktaPay(false);
+    }
+  };
+
+  const handleSaveUddoktaPay = async () => {
+    if (!localUddoktaPay) return;
+    try {
+      const cleanUrl = normalizeUddoktaPayUrl(localUddoktaPay.apiUrl);
+      const isEnabled = localUddoktaPay.isEnabled !== undefined 
+        ? localUddoktaPay.isEnabled 
+        : Boolean(localUddoktaPay.apiKey?.trim());
+      const settingsToSave: UddoktaPaySettings = {
+        ...localUddoktaPay,
+        apiUrl: cleanUrl || (localUddoktaPay.isSandbox ? DEFAULT_SANDBOX_URL : 'https://pay.uddoktapay.com'),
+        isEnabled,
+      };
+      setLocalUddoktaPay(settingsToSave);
+      await setUddoktaPaySettings(settingsToSave);
+      showNotification('UddoktaPay গেটওয়ে সেটিংস সফলভাবে সংরক্ষিত ও সক্রিয় হয়েছে!', 'success');
+    } catch (err: any) {
+      handleFirestoreError(err, OperationType.UPDATE, 'configs/main');
+      showNotification('সেটিংস সেভ করতে সমস্যা হয়েছে', 'error');
+    }
+  };
 
   const handleTestSteadfast = async () => {
     if (!localSteadfast?.apiKey || !localSteadfast?.secretKey) {
@@ -386,31 +504,81 @@ export default function AdminPage() {
   };
 
   const renderDashboard = () => {
-    const totalStockValue = products.reduce((acc, curr) => acc + (Number(curr.price) * Number(curr.stock || 0)), 0);
+    const totalStockItems = products.reduce((acc, curr) => acc + getSafeStock(curr), 0);
+    const totalStockValue = products.reduce((acc, curr) => {
+      const price = parseSafePrice(curr.price);
+      return acc + (price * getSafeStock(curr));
+    }, 0);
+    const outOfStockProducts = products.filter(p => getSafeStock(p) === 0);
 
     return (
       <div className="space-y-8">
         <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-          {[
-            { label: 'মোট প্রডাক্ট', value: products.length, icon: <ShoppingBag />, color: 'primary' },
-            { label: 'মোট অর্ডার', value: orders.length, icon: <Package />, color: 'blue' },
-            { label: 'ইউজার', value: usersList.length, icon: <Users />, color: 'green' },
-            { label: 'স্টক ভ্যালু', value: `৳${totalStockValue}`, icon: <DollarSign />, color: 'amber' },
-          ].map((stat, i) => (
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              key={stat.label} 
-              className="bg-white dark:bg-neutral-900 p-8 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm"
-            >
-              <div className="w-14 h-14 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-4">
-                {stat.icon}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0 }}
+            className="bg-white dark:bg-neutral-900 p-8 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm"
+          >
+            <div className="w-14 h-14 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-4">
+              <ShoppingBag />
+            </div>
+            <p className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-1">মোট প্রডাক্ট</p>
+            <h3 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white">{products.length}</h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-white dark:bg-neutral-900 p-8 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm"
+          >
+            <div className="w-14 h-14 bg-blue-500/10 text-blue-500 rounded-2xl flex items-center justify-center mb-4">
+              <Package />
+            </div>
+            <p className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-1">মোট অর্ডার</p>
+            <h3 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white">{orders.length}</h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white dark:bg-neutral-900 p-8 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm"
+          >
+            <div className="w-14 h-14 bg-green-500/10 text-green-500 rounded-2xl flex items-center justify-center mb-4">
+              <Users />
+            </div>
+            <p className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-1">ইউজার</p>
+            <h3 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white">{usersList.length}</h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            onClick={() => setShowStockModal(true)}
+            className="bg-white dark:bg-neutral-900 p-8 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm cursor-pointer hover:border-amber-500/50 hover:shadow-xl transition-all group relative overflow-hidden"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="w-14 h-14 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                <DollarSign size={28} />
               </div>
-              <p className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-1">{stat.label}</p>
-              <h3 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white">{stat.value}</h3>
-            </motion.div>
-          ))}
+              <span className="text-[10px] font-black uppercase tracking-wider px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300 group-hover:bg-amber-500 group-hover:text-white transition-all flex items-center gap-1 shadow-sm">
+                হিসাব দেখুন ↗
+              </span>
+            </div>
+            <p className="text-sm font-bold text-neutral-400 uppercase tracking-widest mb-1">মোট স্টক ভ্যালু</p>
+            <h3 className="text-2xl md:text-3xl font-black text-neutral-900 dark:text-white">৳{totalStockValue.toLocaleString('en-IN')}</h3>
+            <div className="flex flex-wrap items-center justify-between gap-1 mt-2 pt-2 border-t border-neutral-100 dark:border-neutral-800 text-xs font-bold">
+              <span className="text-amber-600 dark:text-amber-400">{totalStockItems.toLocaleString('en-IN')} টি পণ্য স্টকে</span>
+              {outOfStockProducts.length > 0 && (
+                <span className="text-red-500 text-[10px] bg-red-50 dark:bg-red-950/40 px-2 py-0.5 rounded-md font-black">
+                  {outOfStockProducts.length} টির স্টক ০
+                </span>
+              )}
+            </div>
+          </motion.div>
         </div>
       </div>
     );
@@ -596,8 +764,8 @@ export default function AdminPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-black">Offer Management</h2>
         <button 
-          onClick={() => setEditingOffer({ status: 'active' })}
-          className="bg-primary text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2"
+          onClick={() => setEditingOffer({ status: 'active', link: '/shop' })}
+          className="bg-primary text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-primary/20"
         >
           <Plus size={20} /> Add Offer
         </button>
@@ -605,7 +773,7 @@ export default function AdminPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {offers.map(offer => (
-          <div key={offer.id} className="bg-white dark:bg-neutral-900 rounded-[2rem] overflow-hidden border border-neutral-100 dark:border-neutral-800 relative">
+          <div key={offer.id} className="bg-white dark:bg-neutral-900 rounded-[2rem] overflow-hidden border border-neutral-100 dark:border-neutral-800 relative shadow-sm">
              <div className="absolute top-4 right-4 z-10">
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${offer.status === 'active' ? 'bg-green-50 text-green-600' : 'bg-neutral-100 text-neutral-400'}`}>
                   {offer.status}
@@ -615,7 +783,11 @@ export default function AdminPage() {
              <div className="p-6">
                 {offer.badge && <span className="text-[10px] font-black text-primary uppercase tracking-widest bg-primary/10 px-2 py-1 rounded-lg mb-2 inline-block">{offer.badge}</span>}
                 <h4 className="font-black text-lg mb-1">{offer.title}</h4>
-                <p className="text-sm text-neutral-500 font-bold mb-4">{offer.description}</p>
+                <p className="text-sm text-neutral-500 font-bold mb-3">{offer.description}</p>
+                <div className="flex items-center gap-1.5 mb-4 text-xs font-mono font-bold text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/80 px-3 py-1.5 rounded-xl border border-neutral-100 dark:border-neutral-700/50">
+                   <ExternalLink size={12} className="text-primary flex-shrink-0" />
+                   <span className="truncate">লিংক: {offer.link || '/shop'}</span>
+                </div>
                 <div className="flex gap-2">
                    <button onClick={() => setEditingOffer(offer)} className="flex-1 py-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl font-bold text-xs"><Edit2 size={12} className="inline mr-1"/> Edit</button>
                    <button onClick={async () => {
@@ -1018,6 +1190,357 @@ export default function AdminPage() {
     </div>
   );
 
+  const renderPaymentGateway = () => (
+    <div className="max-w-3xl space-y-8">
+      {/* Top Banner / Gateway Status */}
+      <div className="p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-black">
+              <CreditCard size={24} />
+            </div>
+            <div>
+              <h3 className="text-xl font-black flex items-center gap-2">
+                UddoktaPay Payment Gateway
+              </h3>
+              <p className="text-xs text-neutral-400 font-bold">বিকাশ, নগদ, রকেট ও কার্ড পেমেন্ট অটোমেশন ও ইনস্ট্যান্ট ভেরিফিকেশন</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+              localUddoktaPay?.isEnabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800'
+            }`}>
+              {localUddoktaPay?.isEnabled ? 'Active' : 'Disabled'}
+            </span>
+            <span className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest ${
+              localUddoktaPay?.isSandbox ? 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400'
+            }`}>
+              {localUddoktaPay?.isSandbox ? 'Sandbox (Test)' : 'Live Mode'}
+            </span>
+            <a 
+              href="https://uddoktapay.com" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="p-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-emerald-600 rounded-xl transition-colors"
+              title="UddoktaPay Merchant Portal"
+            >
+              <ExternalLink size={16} />
+            </a>
+          </div>
+        </div>
+
+        {/* Quick Test & Status Card */}
+        <div className="p-6 bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent rounded-3xl border border-emerald-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">গেটওয়ে স্ট্যাটাস</p>
+            <div className="text-xl font-black text-neutral-900 dark:text-white flex items-center gap-2">
+              <span className={`w-3 h-3 rounded-full ${localUddoktaPay?.isEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-neutral-400'}`}></span>
+              {localUddoktaPay?.isEnabled ? (localUddoktaPay.isSandbox ? 'স্যান্ডবক্স মোডে সক্রিয়' : 'লাইভ প্রোডাকশন মোডে সক্রিয়') : 'গেটওয়ে বর্তমানে বন্ধ'}
+            </div>
+            <p className="text-[10px] text-neutral-400 font-medium">UddoktaPay Automated Checkout API v2</p>
+          </div>
+          <button 
+            onClick={handleTestUddoktaPay}
+            disabled={testingUddoktaPay}
+            className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-2 disabled:opacity-50"
+          >
+            {testingUddoktaPay ? (
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            <span>কানেকশন টেস্ট করুন</span>
+          </button>
+        </div>
+
+        {/* Test Result Display */}
+        {uddoktaPayTestResult && (
+          <div className={`p-4 rounded-2xl text-xs font-bold flex items-center gap-3 ${
+            uddoktaPayTestResult.success 
+              ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/50' 
+              : 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-800/50'
+          }`}>
+            {uddoktaPayTestResult.success ? <Check size={16} className="shrink-0 text-emerald-600" /> : <Ban size={16} className="shrink-0 text-red-600" />}
+            <div>
+              <p className="font-black">{uddoktaPayTestResult.success ? 'টেস্ট সফল হয়েছে!' : 'টেস্টে সমস্যা হয়েছে:'}</p>
+              <p className="text-[11px] font-medium opacity-90">{uddoktaPayTestResult.message}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* API Configuration Form */}
+      <div className="p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm space-y-6">
+        <h4 className="text-lg font-black flex items-center gap-2">
+          <Settings size={18} className="text-emerald-600" /> UddoktaPay ক্রেডেনশিয়াল সেটিংস
+        </h4>
+
+        <div className="space-y-5">
+          {/* Enable Gateway Switch */}
+          <div className="flex items-center justify-between p-5 bg-neutral-50 dark:bg-neutral-800 rounded-2xl">
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="font-bold text-sm text-neutral-900 dark:text-white">অটোমেটিক পেমেন্ট গেটওয়ে চালু রাখুন</p>
+                <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full ${
+                  localUddoktaPay?.isEnabled 
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400' 
+                    : 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400'
+                }`}>
+                  {localUddoktaPay?.isEnabled ? 'চালু (ACTIVE)' : 'বন্ধ (INACTIVE)'}
+                </span>
+              </div>
+              <p className="text-[10px] text-neutral-400 font-medium mt-1">চালু থাকলে কাস্টমার চেকআউটে সরাসরি UddoktaPay গেটওয়ে দিয়ে অনলাইন পেমেন্ট করতে পারবে</p>
+            </div>
+            <button 
+              type="button"
+              onClick={() => setLocalUddoktaPay(prev => prev ? { ...prev, isEnabled: !prev.isEnabled } : { apiKey: '', apiUrl: DEFAULT_SANDBOX_URL, isEnabled: true, isSandbox: true })}
+              className={`w-14 h-8 rounded-full transition-all relative cursor-pointer ${localUddoktaPay?.isEnabled ? 'bg-emerald-600' : 'bg-neutral-300 dark:bg-neutral-700'}`}
+            >
+              <div className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-md transition-all ${localUddoktaPay?.isEnabled ? 'left-7' : 'left-1'}`} />
+            </button>
+          </div>
+
+          {/* Environment Mode Selector (Sandbox vs Live) */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
+              এনভায়রনমেন্ট মোড (Environment Mode)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalUddoktaPay(prev => ({
+                    apiKey: prev?.apiKey || DEFAULT_SANDBOX_KEY,
+                    apiUrl: prev?.apiUrl && !prev.apiUrl.includes('uddoktapay.com') ? prev.apiUrl : DEFAULT_SANDBOX_URL,
+                    isEnabled: prev?.isEnabled ?? true,
+                    isSandbox: true
+                  }));
+                }}
+                className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                  localUddoktaPay?.isSandbox 
+                    ? 'border-amber-500 bg-amber-500/5 text-neutral-900 dark:text-white' 
+                    : 'border-neutral-100 dark:border-neutral-800 hover:border-neutral-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-black text-xs">🧪 Sandbox / টেস্ট মোড</span>
+                  {localUddoktaPay?.isSandbox && <span className="w-2 h-2 rounded-full bg-amber-500"></span>}
+                </div>
+                <p className="text-[10px] text-neutral-400 font-medium">টেস্টিং এবং ট্রায়ালের জন্য নিরাপদ স্যান্ডবক্স পরিবেশ</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalUddoktaPay(prev => ({
+                    apiKey: prev?.apiKey || '',
+                    apiUrl: prev?.apiUrl && !prev.apiUrl.includes('sandbox.uddoktapay.com') ? prev.apiUrl : 'https://pay.uddoktapay.com',
+                    isEnabled: prev?.isEnabled ?? true,
+                    isSandbox: false
+                  }));
+                }}
+                className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                  !localUddoktaPay?.isSandbox 
+                    ? 'border-emerald-500 bg-emerald-500/5 text-neutral-900 dark:text-white' 
+                    : 'border-neutral-100 dark:border-neutral-800 hover:border-neutral-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-black text-xs">🚀 Live / রিয়েল মার্চেন্ট মোড</span>
+                  {!localUddoktaPay?.isSandbox && <span className="w-2 h-2 rounded-full bg-emerald-500"></span>}
+                </div>
+                <p className="text-[10px] text-neutral-400 font-medium">প্রকৃত পেমেন্ট কালেকশনের জন্য লাইভ এপিআই</p>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Sandbox Credential Loader */}
+          {localUddoktaPay?.isSandbox && (
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-800 dark:text-amber-300 font-medium">
+                <span className="font-bold">স্যান্ডবক্স টেস্ট কি:</span> UddoktaPay এর ডেমো টেস্ট কি ব্যবহার করতে চান?
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalUddoktaPay(prev => ({
+                    apiKey: DEFAULT_SANDBOX_KEY,
+                    apiUrl: DEFAULT_SANDBOX_URL,
+                    isEnabled: true,
+                    isSandbox: true
+                  }));
+                  showNotification('অফিশিয়াল স্যান্ডবক্স টেস্ট ক্রেডেনশিয়াল লোড হয়েছে', 'success');
+                }}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider shrink-0 transition-colors"
+              >
+                টেস্ট কি অটো-ফিল করুন
+              </button>
+            </div>
+          )}
+
+          {/* API Base URL */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
+                API Base URL (এপিআই লিংক)
+              </label>
+              <span className="text-[10px] text-neutral-400 font-mono">
+                {localUddoktaPay?.isSandbox ? 'স্যান্ডবক্স: https://sandbox.uddoktapay.com' : 'লাইভ: আপনার প্যানেল লিংক'}
+              </span>
+            </div>
+            <input 
+              type="text"
+              value={localUddoktaPay?.apiUrl || ''}
+              onChange={e => setLocalUddoktaPay(prev => prev ? { ...prev, apiUrl: e.target.value } : null)}
+              onBlur={() => {
+                if (localUddoktaPay?.apiUrl) {
+                  const cleaned = normalizeUddoktaPayUrl(localUddoktaPay.apiUrl);
+                  setLocalUddoktaPay(prev => prev ? { ...prev, apiUrl: cleaned } : null);
+                }
+              }}
+              placeholder="https://vaivaizone.paymently.io অথবা https://pay.uddoktapay.com"
+              className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-mono font-bold text-sm"
+            />
+            <p className="text-[10px] text-neutral-400 font-medium">
+              💡 টিপস: আপনি যদি নিজস্ব পেমেন্টলি ডোমেন ব্যবহার করেন (যেমন: <code className="text-emerald-600 dark:text-emerald-400 font-bold font-mono">https://vaivaizone.paymently.io</code>), শুধু ডোমেন লিংকটি দিলেই হবে। শেষে <code className="text-rose-500 font-mono font-bold">/api</code> দেওয়ার প্রয়োজন নেই।
+            </p>
+          </div>
+
+          {/* API Key */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
+              API Key (UddoktaPay মার্চেন্ট এপিআই কি)
+            </label>
+            <div className="relative">
+              <input 
+                type={showUddoktaPayApiKey ? 'text' : 'password'}
+                value={localUddoktaPay?.apiKey || ''}
+                onChange={e => setLocalUddoktaPay(prev => prev ? { ...prev, apiKey: e.target.value } : null)}
+                placeholder="এখানে UddoktaPay API Key পেস্ট করুন"
+                className="w-full px-6 pr-14 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-mono font-bold text-sm"
+              />
+              <button 
+                type="button"
+                onClick={() => setShowUddoktaPayApiKey(!showUddoktaPayApiKey)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-neutral-400 hover:text-neutral-600 rounded-lg"
+              >
+                {showUddoktaPayApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+          <button 
+            type="button"
+            onClick={handleTestUddoktaPay}
+            disabled={testingUddoktaPay}
+            className="py-4 border-2 border-neutral-100 dark:border-neutral-800 rounded-2xl font-black text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2"
+          >
+            <Check size={16} /> টেস্ট কানেকশন
+          </button>
+          <button 
+            type="button"
+            onClick={handleSaveUddoktaPay}
+            className="py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-colors"
+          >
+            <Save size={16} /> গেটওয়ে সেটিংস সেভ করুন
+          </button>
+        </div>
+      </div>
+
+      {/* Manual Payment Fallback Numbers Section */}
+      <div className="p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm space-y-6">
+        <h4 className="text-lg font-black flex items-center gap-2">
+          <Phone size={18} className="text-primary" /> ম্যানুয়াল পেমেন্ট নম্বর সেটিংস (বিকাশ, নগদ, রকেট)
+        </h4>
+        <p className="text-xs text-neutral-400 font-medium">
+          অটোমেটিক গেটওয়ে বন্ধ থাকলে অথবা গ্রাহক ম্যানুয়াল পেমেন্ট নির্বাচন করলে এই নম্বরগুলোতে সেন্ড মানি/ক্যাশ ইন করতে পারবে:
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-pink-600 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-pink-500"></span> বিকাশ নম্বর
+            </label>
+            <input 
+              type="text"
+              value={localContactInfo?.paymentBkash || ''}
+              onChange={e => setLocalContactInfo(prev => prev ? { ...prev, paymentBkash: e.target.value } : null)}
+              placeholder="01XXXXXXXXX"
+              className="w-full px-4 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-orange-600 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-orange-500"></span> নগদ নম্বর
+            </label>
+            <input 
+              type="text"
+              value={localContactInfo?.paymentNagad || ''}
+              onChange={e => setLocalContactInfo(prev => prev ? { ...prev, paymentNagad: e.target.value } : null)}
+              placeholder="01XXXXXXXXX"
+              className="w-full px-4 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-500"></span> রকেট নম্বর
+            </label>
+            <input 
+              type="text"
+              value={localContactInfo?.paymentRocket || ''}
+              onChange={e => setLocalContactInfo(prev => prev ? { ...prev, paymentRocket: e.target.value } : null)}
+              placeholder="01XXXXXXXXX"
+              className="w-full px-4 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm"
+            />
+          </div>
+        </div>
+
+        <button 
+          type="button"
+          onClick={async () => {
+            if (localContactInfo) {
+              await setContactInfo(localContactInfo);
+              showNotification('ম্যানুয়াল পেমেন্ট নম্বর সংরক্ষিত হয়েছে!', 'success');
+            }
+          }}
+          className="w-full py-3.5 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 rounded-2xl font-black text-xs transition-colors flex items-center justify-center gap-2"
+        >
+          <Save size={14} /> ম্যানুয়াল পেমেন্ট নম্বর সেভ করুন
+        </button>
+      </div>
+
+      {/* Guide Card */}
+      <div className="p-8 bg-neutral-50 dark:bg-neutral-900/60 rounded-[2.5rem] border border-neutral-200 dark:border-neutral-800 space-y-4">
+        <h4 className="font-black text-sm text-neutral-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+          📖 কিভাবে UddoktaPay চালু করবেন?
+        </h4>
+        <div className="space-y-3 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed font-medium">
+          <div className="flex gap-3">
+            <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">১</span>
+            <p>প্রথমে <a href="https://uddoktapay.com" target="_blank" rel="noreferrer" className="text-emerald-600 font-bold underline">UddoktaPay ওয়েবসাইটে</a> গিয়ে একটি মার্চেন্ট অ্যাকাউন্ট তৈরি বা লগইন করুন।</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">২</span>
+            <p>ড্যাশবোর্ড থেকে <b>Settings / API</b> পেজে গিয়ে আপনার মার্চেন্ট <b>API Key</b> কপি করুন।</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">৩</span>
+            <p>উপরে <b>"API Key"</b> বক্সে কি পেস্ট করুন এবং <b>"অটোমেটিক পেমেন্ট গেটওয়ে চালু করুন"</b> সুইচ অন করুন।</p>
+          </div>
+          <div className="flex gap-3">
+            <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold shrink-0 text-[10px]">৪</span>
+            <p><b>"টেস্ট কানেকশন"</b> বাটনে চাপ দিয়ে যাচাই করুন এবং <b>"গেটওয়ে সেটিংস সেভ করুন"</b> বাটনে ক্লিক করুন। ব্যস, গ্রাহক এখন চেকআউটে সরাসরি বিকাশ, নগদ, রকেট দিয়ে পেমেন্ট সম্পন্ন করতে পারবে এবং পেমেন্ট স্বয়ংক্রিয়ভাবে ভেরিফাই হয়ে যাবে!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderCategories = () => (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1319,37 +1842,73 @@ export default function AdminPage() {
   };
 
   const renderProducts = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl md:text-2xl font-black">{language === 'bn' ? "প্রডাক্ট ম্যানেজমেন্ট" : "Products"}</h2>
-        <button 
-          onClick={() => { setEditingProduct({}); setIsProductModalOpen(true); }}
-          className="bg-primary text-white p-3 md:px-6 md:py-3 rounded-2xl font-bold flex items-center gap-2"
-        >
-          <Plus size={20} /> <span className="hidden md:inline">নতুন যোগ করুন</span>
-        </button>
+    <div className="space-y-6 pb-28">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl md:text-2xl font-black">{language === 'bn' ? "প্রডাক্ট ম্যানেজমেন্ট" : "Products"}</h2>
+          <p className="text-xs text-neutral-400 font-bold mt-0.5">মোট {products.length} টি প্রডাক্ট তালিকাভুক্ত</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setShowStockModal(true)}
+            className="bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500 hover:text-white px-4 py-3 rounded-2xl font-bold text-xs flex items-center gap-2 transition-all border border-amber-500/20 shadow-sm"
+          >
+            <Calculator size={16} /> <span>স্টক অডিট ও হিসাব</span>
+          </button>
+          <button 
+            onClick={() => { setEditingProduct({ stock: 0 }); setIsProductModalOpen(true); }}
+            className="bg-primary text-white p-3 md:px-6 md:py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-primary/20 text-xs md:text-sm"
+          >
+            <Plus size={18} /> <span>নতুন যোগ করুন</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
         {products.map(p => (
-          <div key={p.id} className="bg-white dark:bg-neutral-900 p-4 rounded-[2rem] border border-neutral-100 dark:border-neutral-800">
-            <img src={p.image} className="w-full aspect-square object-cover rounded-2xl mb-4" alt="" />
-            <div className="flex flex-wrap gap-1 mb-2">
-              <span className="text-[8px] px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 rounded font-black text-neutral-500 uppercase tracking-tighter">
-                {categories[p.category]?.name || p.category}
-              </span>
-              {p.subCategory && (
-                <span className="text-[8px] px-1.5 py-0.5 bg-primary/10 rounded font-black text-primary uppercase tracking-tighter">
-                  {categories[p.category]?.subcategories?.find(s => s.id === p.subCategory)?.name || p.subCategory}
+          <div key={p.id} className="bg-white dark:bg-neutral-900 p-4 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 flex flex-col justify-between shadow-xs hover:border-neutral-200 dark:hover:border-neutral-700 transition-all">
+            <div>
+              <img src={p.image} className="w-full aspect-square object-cover rounded-2xl mb-4" alt="" />
+              <div className="flex flex-wrap gap-1 mb-2">
+                <span className="text-[8px] px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 rounded font-black text-neutral-500 uppercase tracking-tighter">
+                  {categories[p.category]?.name || p.category}
                 </span>
-              )}
+                {p.subCategory && (
+                  <span className="text-[8px] px-1.5 py-0.5 bg-primary/10 rounded font-black text-primary uppercase tracking-tighter">
+                    {categories[p.category]?.subcategories?.find(s => s.id === p.subCategory)?.name || p.subCategory}
+                  </span>
+                )}
+              </div>
+              <h4 className="font-bold mb-2 line-clamp-1 text-sm">{p.name}</h4>
             </div>
-            <h4 className="font-bold mb-2 line-clamp-1">{p.name}</h4>
-            <div className="flex justify-between items-center">
-              <span className="text-primary font-black">৳{p.price}</span>
-              <div className="flex gap-2">
-                <button onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }} className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-blue-500"><Edit2 size={14}/></button>
-                <button onClick={() => setDeleteConfirmId(p.id)} className="p-2 bg-neutral-100 dark:bg-neutral-800 rounded-lg text-red-500"><Trash2 size={14}/></button>
+            <div className="flex justify-between items-center pt-2.5 mt-2 border-t border-neutral-100 dark:border-neutral-800/60 gap-1.5">
+              <div className="min-w-0 pr-1">
+                <span className="text-primary font-black text-sm block truncate">৳{parseSafePrice(p.price).toLocaleString('en-IN')}</span>
+                <div className="flex items-center gap-1 text-[10px] font-bold mt-0.5 flex-wrap">
+                  <span className="text-neutral-400 shrink-0">স্টক:</span>
+                  <span className={`font-black px-1.5 py-0.2 rounded text-[10px] shrink-0 ${getSafeStock(p) === 0 ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-neutral-800 dark:text-neutral-200'}`}>
+                    {getSafeStock(p)}
+                  </span>
+                  {getSafeStock(p) === 0 && (
+                    <span className="text-[9px] font-black text-red-500 uppercase shrink-0">খালি</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button 
+                  onClick={() => { setEditingProduct(p); setIsProductModalOpen(true); }} 
+                  className="p-2.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 dark:text-blue-400 rounded-xl transition-all active:scale-90 flex items-center justify-center shadow-xs"
+                  title="এডিট করুন"
+                >
+                  <Edit2 size={15}/>
+                </button>
+                <button 
+                  onClick={() => setDeleteConfirmId(p.id)} 
+                  className="p-2.5 bg-red-50 hover:bg-red-100 text-red-600 dark:bg-red-950/50 dark:hover:bg-red-900/60 dark:text-red-400 rounded-xl transition-all active:scale-90 flex items-center justify-center shadow-xs"
+                  title="ডিলেট করুন"
+                >
+                  <Trash2 size={15}/>
+                </button>
               </div>
             </div>
           </div>
@@ -1592,43 +2151,97 @@ export default function AdminPage() {
     }
   };
 
-  const renderUsers = () => (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h2 className="text-xl md:text-2xl font-black">{language === 'bn' ? "ইউজার ম্যানেজমেন্ট" : "User Management"}</h2>
-        <span className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest">
-          Total Users: {usersList.length}
-        </span>
-      </div>
+  const renderUsers = () => {
+    const filteredUsers = usersList.filter(u => {
+      if (!userSearchQuery.trim()) return true;
+      const q = userSearchQuery.toLowerCase().trim();
+      const idMatch = (u.id || '').toLowerCase().includes(q);
+      const emailMatch = (u.email || '').toLowerCase().includes(q);
+      const nameMatch = (u.displayName || '').toLowerCase().includes(q);
+      const phoneMatch = (u.phone || '').toLowerCase().includes(q);
+      return idMatch || emailMatch || nameMatch || phoneMatch;
+    });
 
-      <div className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="border-b border-neutral-100 dark:border-neutral-800">
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">User Profile</th>
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Contact Info</th>
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Role</th>
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Verification Status</th>
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Last Activity</th>
-                <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-              {usersList.length > 0 ? usersList.map((u) => (
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <h2 className="text-xl md:text-2xl font-black">{language === 'bn' ? "ইউজার ম্যানেজমেন্ট" : "User Management"}</h2>
+          <span className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest">
+            {language === 'bn' ? `মোট ইউজার: ${usersList.length}` : `Total Users: ${usersList.length}`}
+          </span>
+        </div>
+
+        {/* User Search Bar */}
+        <div className="flex flex-col sm:flex-row items-center gap-4 bg-white dark:bg-neutral-900 p-4 rounded-3xl border border-neutral-100 dark:border-neutral-800 shadow-sm">
+          <div className="relative flex-grow w-full">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+            <input 
+              type="text"
+              value={userSearchQuery}
+              onChange={(e) => setUserSearchQuery(e.target.value)}
+              placeholder={language === 'bn' ? "ইউজার আইডি (UID) বা জী-মেইল বা নাম বা ফোন দিয়ে সার্চ করুন..." : "Search by User ID, Gmail, name or phone..."}
+              className="w-full pl-11 pr-10 py-3.5 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl text-sm font-medium border border-transparent focus:border-primary/30 focus:outline-none transition-all placeholder:text-neutral-400"
+            />
+            {userSearchQuery && (
+              <button 
+                onClick={() => setUserSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded-lg"
+                title="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+          {userSearchQuery && (
+            <div className="text-xs font-black text-primary bg-primary/10 px-4 py-2.5 rounded-xl whitespace-nowrap">
+              {language === 'bn' ? `পাওয়া গেছে: ${filteredUsers.length} জন` : `Found: ${filteredUsers.length}`}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-neutral-100 dark:border-neutral-800">
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">User Profile & ID</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Contact Info</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Role</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Verification Status</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Last Activity</th>
+                  <th className="px-8 py-6 text-[10px] font-black text-neutral-400 uppercase tracking-widest">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {filteredUsers.length > 0 ? filteredUsers.map((u) => (
                 <tr key={u.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
                   <td className="px-8 py-6">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-start gap-4">
                       {u.photoURL ? (
-                        <img src={u.photoURL} className="w-10 h-10 rounded-full border-2 border-primary/20" alt="" />
+                        <img src={u.photoURL} className="w-10 h-10 rounded-full border-2 border-primary/20 shrink-0 mt-0.5" alt="" />
                       ) : (
-                        <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-400">
+                        <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-400 shrink-0 mt-0.5">
                           <Users size={20} />
                         </div>
                       )}
-                      <div>
+                      <div className="space-y-1 min-w-0">
                         <div className="font-bold text-sm text-neutral-900 dark:text-neutral-100">{u.displayName || 'Anonymous User'}</div>
-                        <div className="text-[10px] text-neutral-400 font-bold">{u.email}</div>
+                        <div className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">{u.email}</div>
+                        <div className="flex items-center gap-1.5 text-[11px] font-mono text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800/80 px-2 py-0.5 rounded-lg w-fit border border-neutral-200/50 dark:border-neutral-700/50">
+                          <span className="font-bold text-[9px] uppercase text-primary tracking-wider">UID:</span>
+                          <span className="truncate max-w-[130px]" title={u.id}>{u.id}</span>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(u.id);
+                              showNotification(language === 'bn' ? 'ইউজার আইডি কপি হয়েছে!' : 'User ID copied!', 'success');
+                            }}
+                            className="hover:text-primary transition-colors p-0.5"
+                            title="Copy User ID"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -1690,7 +2303,21 @@ export default function AdminPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={5} className="px-8 py-12 text-center text-neutral-400 font-bold">কোন ইউজার পাওয়া যায়নি</td>
+                  <td colSpan={6} className="px-8 py-14 text-center text-neutral-400 font-bold">
+                    <div className="max-w-xs mx-auto space-y-2">
+                      <Users size={32} className="mx-auto text-neutral-300 dark:text-neutral-700" />
+                      <p>
+                        {userSearchQuery 
+                          ? (language === 'bn' ? `"${userSearchQuery}" দিয়ে কোনো ইউজার পাওয়া যায়নি` : `No users found for "${userSearchQuery}"`)
+                          : (language === 'bn' ? "কোন ইউজার পাওয়া যায়নি" : "No users found")}
+                      </p>
+                      {userSearchQuery && (
+                        <button onClick={() => setUserSearchQuery('')} className="text-xs text-primary font-bold underline">
+                          {language === 'bn' ? "সার্চ ক্লিয়ার করুন" : "Clear Search"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -1698,7 +2325,8 @@ export default function AdminPage() {
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   const tabs = [
     { id: 'dashboard', label: 'ড্যাশবোর্ড', icon: <LayoutDashboard size={18} /> },
@@ -1712,6 +2340,7 @@ export default function AdminPage() {
     { id: 'messages', label: 'নোটিশ', icon: <MessageSquare size={18} /> },
     { id: 'telegram', label: 'টেলিগ্রাম', icon: <Send size={18} /> },
     { id: 'steadfast', label: 'স্টেডফাস্ট কুরিয়ার', icon: <Truck size={18} /> },
+    { id: 'payment-gateway', label: 'পেমেন্ট গেটওয়ে', icon: <CreditCard size={18} /> },
     { id: 'social-links', label: 'সোশ্যাল লিংক', icon: <Share2 size={18} /> },
     { id: 'appearance', label: 'সেটিংস্', icon: <Settings size={18} /> }
   ];
@@ -1799,14 +2428,14 @@ export default function AdminPage() {
           </div>
         </aside>
 
-        <main className="flex-grow p-4 md:p-12 mt-16 md:mt-0 overflow-y-auto">
+        <main className="flex-grow p-4 md:p-12 pb-36 md:pb-32 mt-16 md:mt-0 min-h-[calc(100vh-4rem)] md:min-h-screen overflow-y-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="max-w-6xl mx-auto"
+              className="max-w-6xl mx-auto pb-24"
             >
               {activeTab === 'dashboard' && renderDashboard()}
               {activeTab === 'products' && renderProducts()}
@@ -1820,6 +2449,7 @@ export default function AdminPage() {
               {activeTab === 'messages' && renderMessages()}
               {activeTab === 'telegram' && renderTelegram()}
               {activeTab === 'steadfast' && renderSteadfast()}
+              {activeTab === 'payment-gateway' && renderPaymentGateway()}
               {activeTab === 'appearance' && renderAppearance()}
             </motion.div>
           </AnimatePresence>
@@ -2312,7 +2942,7 @@ export default function AdminPage() {
                             <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Product Name</label>
                             <input type="text" value={editingProduct.name || ''} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold" />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Normal Price (৳)</label>
                                 <input type="number" value={editingProduct.price || ''} onChange={e => {
@@ -2342,6 +2972,20 @@ export default function AdminPage() {
                                     }
                                     setEditingProduct({...editingProduct, originalPrice: original, discount: disc});
                                 }} className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold" />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Stock Quantity (স্টক সংখ্যা)</label>
+                                <input 
+                                  type="number" 
+                                  min="0"
+                                  value={editingProduct.stock !== undefined ? editingProduct.stock : 0} 
+                                  onChange={e => {
+                                    const parsed = parseInt(e.target.value, 10);
+                                    setEditingProduct({...editingProduct, stock: isNaN(parsed) ? 0 : Math.max(0, parsed)});
+                                  }} 
+                                  placeholder="0"
+                                  className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold" 
+                                />
                             </div>
                         </div>
                         {editingProduct.discount && (
@@ -2522,10 +3166,16 @@ export default function AdminPage() {
                   onClick={async () => {
                     try {
                       if (!editingProduct.name) return showNotification('প্রডাক্টের নাম দিন', 'error');
+                      const productToSave: Product = {
+                        ...editingProduct,
+                        price: parseSafePrice(editingProduct.price),
+                        originalPrice: editingProduct.originalPrice ? parseSafePrice(editingProduct.originalPrice) : undefined,
+                        stock: getSafeStock(editingProduct),
+                      } as Product;
                       if (editingProduct.id) {
-                        await updateProduct(editingProduct as Product);
+                        await updateProduct(productToSave);
                       } else {
-                        await addProduct(editingProduct as Product);
+                        await addProduct(productToSave);
                       }
                       setIsProductModalOpen(false);
                       showNotification('প্রডাক্ট সফলভাবে সেভ করা হয়েছে!');
@@ -2533,7 +3183,7 @@ export default function AdminPage() {
                       showNotification('প্রডাক্ট সেভ করতে সমস্যা হয়েছে', 'error');
                     }
                   }}
-                  className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg mt-8"
+                  className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-lg mt-8 shadow-primary/20"
                 >
                   Save Product
                 </button>
@@ -2650,15 +3300,48 @@ export default function AdminPage() {
                         </select>
                       </div>
                    </div>
+                   <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
+                          Explore Button Link (ক্লিক করলে যেখানে যাবে)
+                        </label>
+                        <span className="text-[10px] text-neutral-400 font-bold">ডিফল্ট: /shop</span>
+                      </div>
+                      <input 
+                        type="text" 
+                        value={editingOffer.link || ''} 
+                        onChange={e => setEditingOffer({...editingOffer, link: e.target.value})} 
+                        placeholder="যেমন: /shop অথবা https://..." 
+                        className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 font-bold" 
+                      />
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-[10px] text-neutral-400 font-bold">কুইক লিংক:</span>
+                        {['/shop', '/category/gadgets-accessories', '/category/fashion-lifestyle'].map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setEditingOffer({...editingOffer, link: preset})}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-primary/10 hover:text-primary transition-all"
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                   </div>
                 </div>
                 <button 
                   onClick={async () => {
                     try {
                       if (!editingOffer.title) return showNotification('অফার টাইটেল দিন', 'error');
+                      const offerToSave: Offer = {
+                        ...editingOffer,
+                        link: (editingOffer.link && editingOffer.link.trim()) || '/shop',
+                        status: editingOffer.status || 'active',
+                      } as Offer;
                       if (editingOffer.id) {
-                        await updateOffer(editingOffer.id, editingOffer);
+                        await updateOffer(editingOffer.id, offerToSave);
                       } else {
-                        await addOffer({ ...editingOffer, id: `offer-${Date.now()}` } as Offer);
+                        await addOffer({ ...offerToSave, id: `offer-${Date.now()}` } as Offer);
                       }
                       setEditingOffer(null);
                       showNotification('অফার সেভ করা হয়েছে!');
@@ -2812,6 +3495,234 @@ export default function AdminPage() {
                     }
                     setDeleteConfirmId(null);
                   }} className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black">হ্যাঁ</button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
+          {/* Stock Breakdown & Audit Modal */}
+          {showStockModal && (
+            <div 
+              key="stock-audit-modal"
+              className="fixed inset-0 z-[700] flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-md overflow-y-auto"
+            >
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 15 }} 
+                animate={{ opacity: 1, scale: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.95, y: 15 }} 
+                className="bg-white dark:bg-neutral-900 rounded-[2.5rem] w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl border border-neutral-100 dark:border-neutral-800 overflow-hidden my-auto"
+              >
+                {/* Header */}
+                <div className="p-5 sm:p-7 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-800/40">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-12 h-12 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center">
+                      <Calculator size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
+                        স্টক ভ্যালু বিশ্লেষণ ও অডিট
+                      </h3>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400 font-bold mt-0.5">
+                        প্রতিটি প্রডাক্টের স্টক এবং হিসাবের বিস্তারিত তালিকা
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowStockModal(false)} 
+                    className="p-2.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl text-neutral-500 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Body Content */}
+                <div className="p-5 sm:p-7 overflow-y-auto space-y-6 flex-1">
+                  {/* Calculation Formula & Clarification Banner */}
+                  <div className="p-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-neutral-800 dark:text-neutral-200">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" size={20} />
+                      <div className="space-y-1.5 text-xs">
+                        <p className="font-black text-amber-800 dark:text-amber-300 uppercase tracking-wider">
+                          স্টক ভ্যালু কিভাবে হিসাব হয়?
+                        </p>
+                        <p className="leading-relaxed">
+                          হিসাবের সূত্র: <span className="text-neutral-900 dark:text-white font-mono font-black bg-white/70 dark:bg-neutral-800 px-2 py-0.5 rounded border border-amber-500/20">প্রতিটি পণ্যের একক দাম × স্টকের সংখ্যা = সাব-টোটাল</span>। সকল পণ্যের সাব-টোটালের যোগফলই হলো ড্যাশবোর্ডের মোট স্টক ভ্যালু।
+                        </p>
+                        <p className="text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                          📌 <strong>পূর্বে যে কারণে হিসাব অস্বাভাবিক লাগছিল:</strong> সিস্টেমে যেসব প্রডাক্টের স্টক ফিল্ড খালি ছিল, পূর্বে সেগুলোতে ডিফল্ট হিসেবে ১৫ টি ধরে হিসাব হতো। এখন তা পরিবর্তন করে সম্পূর্ণ সঠিক করা হয়েছে—কোনো প্রডাক্টের স্টক না দিলে তা <strong>০</strong> হিসেবে গণ্য হয়।
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">সর্বমোট স্টক ভ্যালু</p>
+                      <h4 className="text-xl font-black text-amber-600 dark:text-amber-400 mt-1">
+                        ৳{products.reduce((acc, curr) => acc + (parseSafePrice(curr.price) * getSafeStock(curr)), 0).toLocaleString('en-IN')}
+                      </h4>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">মোট আইটেম স্টকে</p>
+                      <h4 className="text-xl font-black text-neutral-900 dark:text-white mt-1">
+                        {products.reduce((acc, curr) => acc + getSafeStock(curr), 0).toLocaleString('en-IN')} টি
+                      </h4>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">তালিকাভুক্ত পণ্য</p>
+                      <h4 className="text-xl font-black text-neutral-900 dark:text-white mt-1">
+                        {products.length} টি
+                      </h4>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
+                      <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">স্টক শেষ / খালি</p>
+                      <h4 className="text-xl font-black text-red-500 mt-1">
+                        {products.filter(p => getSafeStock(p) === 0).length} টি
+                      </h4>
+                    </div>
+                  </div>
+
+                  {/* Search, Filter & Bulk Fix Tool */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                    <div className="relative w-full sm:w-72">
+                      <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+                      <input 
+                        type="text" 
+                        value={stockSearchQuery} 
+                        onChange={e => setStockSearchQuery(e.target.value)} 
+                        placeholder="পণ্য বা ক্যাটাগরি খুঁজুন..." 
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-800 text-xs font-bold border-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+                      {(['all', 'in_stock', 'out_of_stock'] as const).map(f => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setStockFilter(f)}
+                          className={`text-xs font-bold px-3.5 py-2 rounded-xl transition-all whitespace-nowrap ${
+                            stockFilter === f 
+                              ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-sm' 
+                              : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {f === 'all' ? `সকল পণ্য (${products.length})` : f === 'in_stock' ? `স্টক আছে (${products.length - products.filter(p => getSafeStock(p) === 0).length})` : `স্টক খালি (${products.filter(p => getSafeStock(p) === 0).length})`}
+                        </button>
+                      ))}
+                      {products.some(p => p.stock === undefined || p.stock === null || String(p.stock).trim() === '') && (
+                        <button
+                          type="button"
+                          disabled={isBulkFixingStock}
+                          onClick={handleBulkSetZeroStock}
+                          className="text-xs font-bold px-3 py-2 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500 hover:text-white transition-all whitespace-nowrap"
+                        >
+                          {isBulkFixingStock ? 'আপডেট হচ্ছে...' : 'খালি স্টকগুলো ০ সেট করুন'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Products Stock Breakdown List */}
+                  <div className="border border-neutral-100 dark:border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-100 dark:divide-neutral-800">
+                    {/* Header Row */}
+                    <div className="hidden sm:grid grid-cols-12 gap-3 p-3.5 bg-neutral-50 dark:bg-neutral-800/60 text-[10px] font-black uppercase text-neutral-400 tracking-wider">
+                      <div className="col-span-5">প্রডাক্টের নাম ও ক্যাটাগরি</div>
+                      <div className="col-span-2 text-right">একক মূল্য (Price)</div>
+                      <div className="col-span-3 text-center">স্টক সংখ্যা (Stock)</div>
+                      <div className="col-span-2 text-right">মোট স্টক ভ্যালু</div>
+                    </div>
+
+                    {filteredStockProducts.map(p => {
+                      const stockVal = getSafeStock(p);
+                      const unitPrice = parseSafePrice(p.price);
+                      const subtotal = stockVal * unitPrice;
+                      const isSaving = savingStockId === p.id;
+                      const quickVal = quickStockValues[p.id] !== undefined ? quickStockValues[p.id] : String(stockVal);
+
+                      return (
+                        <div key={p.id} className="p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center hover:bg-neutral-50/60 dark:hover:bg-neutral-800/40 transition-colors">
+                          <div className="col-span-1 sm:col-span-5 flex items-center gap-3">
+                            <img src={p.image} alt={p.name} className="w-11 h-11 object-cover rounded-xl bg-neutral-100 dark:bg-neutral-800 flex-shrink-0" />
+                            <div className="min-w-0">
+                              <p className="font-bold text-xs text-neutral-900 dark:text-white truncate">{p.name}</p>
+                              <span className="text-[10px] text-neutral-400 font-medium">
+                                {categories[p.category]?.name || p.category}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="col-span-1 sm:col-span-2 sm:text-right flex items-center justify-between sm:justify-end gap-2">
+                            <span className="text-[10px] text-neutral-400 sm:hidden">একক মূল্য:</span>
+                            <span className="font-mono font-bold text-xs text-neutral-800 dark:text-neutral-200">
+                              ৳{unitPrice.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+
+                          <div className="col-span-1 sm:col-span-3 flex items-center justify-between sm:justify-center gap-2">
+                            <span className="text-[10px] text-neutral-400 sm:hidden">স্টক সংখ্যা:</span>
+                            <div className="flex items-center gap-1.5">
+                              <input 
+                                type="number" 
+                                min="0" 
+                                value={quickVal} 
+                                onChange={e => setQuickStockValues({ ...quickStockValues, [p.id]: e.target.value })} 
+                                className="w-20 px-2.5 py-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-xs font-mono font-bold text-center border-none"
+                              />
+                              <button
+                                type="button"
+                                disabled={isSaving}
+                                onClick={async () => {
+                                  const parsed = parseInt(quickVal, 10);
+                                  const newStock = isNaN(parsed) ? 0 : Math.max(0, parsed);
+                                  setSavingStockId(p.id);
+                                  try {
+                                    await updateProduct({ ...p, stock: newStock });
+                                    showNotification(`${p.name} এর স্টক ${newStock} টি তে আপডেট হয়েছে`);
+                                  } catch (err) {
+                                    showNotification('স্টক আপডেট করতে সমস্যা হয়েছে', 'error');
+                                  } finally {
+                                    setSavingStockId(null);
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-white text-[10px] font-bold transition-all disabled:opacity-50 flex items-center gap-1"
+                              >
+                                {isSaving ? '...' : <><Check size={12} /> সেভ</>}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="col-span-1 sm:col-span-2 sm:text-right flex items-center justify-between sm:justify-end gap-2">
+                            <span className="text-[10px] text-neutral-400 sm:hidden">মোট ভ্যালু:</span>
+                            <span className={`font-mono font-black text-xs ${stockVal === 0 ? 'text-neutral-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                              ৳{subtotal.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {filteredStockProducts.length === 0 && (
+                      <div className="p-8 text-center text-neutral-400 text-xs font-bold">
+                        কোনো প্রডাক্ট পাওয়া যায়নি
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 sm:p-6 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between bg-neutral-50/70 dark:bg-neutral-800/40">
+                  <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400">
+                    প্রদর্শিত পণ্য: {filteredStockProducts.length} টি
+                  </span>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowStockModal(false)} 
+                    className="px-6 py-2.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-xl font-bold text-xs hover:opacity-90 transition-opacity"
+                  >
+                    বন্ধ করুন
+                  </button>
                 </div>
               </motion.div>
             </div>

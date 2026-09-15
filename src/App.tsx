@@ -31,6 +31,7 @@ const CartPage = lazy(() => import("./pages/CartPage"));
 const CheckoutPage = lazy(() => import("./pages/CheckoutPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+const PaymentVerifyPage = lazy(() => import("./pages/PaymentVerifyPage"));
 
 // Loading fallback component
 const PageLoader = () => (
@@ -65,6 +66,7 @@ function AnimatedRoutes() {
     { path: "/products", element: <AllProductsPage /> },
     { path: "/cart", element: <CartPage /> },
     { path: "/checkout", element: <CheckoutPage /> },
+    { path: "/payment-verify", element: <PaymentVerifyPage /> },
     { path: "/product/:productId", element: <ProductDetailsPage /> },
     { path: "/profile", element: <ProfilePage /> },
     { path: "/contact", element: <ContactPage /> },

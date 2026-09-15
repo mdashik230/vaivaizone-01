@@ -38,13 +38,16 @@ export interface Order {
   steadfastStatus?: string;
   steadfastBookedAt?: string;
   steadfastNote?: string;
+  // UddoktaPay Fields
+  uddoktaPayInvoiceId?: string;
+  uddoktaPayStatus?: string;
 }
 
 interface OrderContextType {
   orders: Order[];
   addOrder: (order: Omit<Order, 'id'>) => Promise<string>;
-  updateOrderStatus: (orderId: string, status: Order["status"]) => void;
-  updateOrder: (orderId: string, data: Partial<Order>) => void;
+  updateOrderStatus: (orderId: string, status: Order["status"]) => Promise<void>;
+  updateOrder: (orderId: string, data: Partial<Order>) => Promise<void>;
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);

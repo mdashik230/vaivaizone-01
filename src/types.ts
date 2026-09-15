@@ -87,3 +87,34 @@ export interface SteadfastOrderResponse {
   consignment?: SteadfastConsignment;
   errors?: Record<string, string[]>;
 }
+
+export interface UddoktaPaySettings {
+  apiKey: string;
+  apiUrl: string;
+  isEnabled: boolean;
+  isSandbox: boolean;
+  allowManualFallback?: boolean;
+}
+
+export interface UddoktaPayChargeParams {
+  fullName: string;
+  email: string;
+  amount: number;
+  metadata?: Record<string, any>;
+  redirectUrl: string;
+  cancelUrl: string;
+}
+
+export interface UddoktaPayVerifyResponse {
+  status: 'COMPLETED' | 'PENDING' | 'ERROR' | 'CANCELLED' | string;
+  amount?: string | number;
+  fee?: string | number;
+  charged_amount?: string | number;
+  invoice_id?: string;
+  payment_method?: string;
+  sender_number?: string;
+  transaction_id?: string;
+  date?: string;
+  metadata?: Record<string, any>;
+  message?: string;
+}

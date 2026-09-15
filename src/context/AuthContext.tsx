@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { User, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, getDoc, onSnapshot as onDocSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
@@ -79,17 +79,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const isAuthenticatingRef = useRef(false);
+
   const loginWithGoogle = async () => {
+    if (isAuthenticatingRef.current) {
+      console.warn("Sign-in already in progress, ignoring concurrent request.");
+      return;
+    }
+    isAuthenticatingRef.current = true;
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      if (error.code === 'auth/popup-closed-by-user') {
+      const code = error?.code || '';
+      const msg = error?.message || '';
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request' ||
+        msg.includes('cancelled-popup-request') ||
+        msg.includes('Pending promise was never set')
+      ) {
+        console.info("Sign-in popup was closed or cancelled by user.");
         return;
       }
       console.error("Login Error:", error);
       throw error;
+    } finally {
+      setTimeout(() => {
+        isAuthenticatingRef.current = false;
+      }, 500);
     }
   };
 

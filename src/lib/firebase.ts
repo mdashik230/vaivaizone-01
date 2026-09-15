@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, getDocFromServer, doc } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, getDocFromServer, doc } from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import rawConfig from '../../firebase-applet-config.json';
 
@@ -15,9 +15,23 @@ const firebaseConfig = {
 };
 
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db = (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
-  ? getFirestore(app, rawConfig.firestoreDatabaseId)
-  : getFirestore(app);
+
+// Use long-polling transport to ensure reliable connection in container and iframe environments
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  }, (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
+    ? rawConfig.firestoreDatabaseId
+    : undefined
+  );
+} catch {
+  dbInstance = (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
+    ? getFirestore(app, rawConfig.firestoreDatabaseId)
+    : getFirestore(app);
+}
+
+export const db = dbInstance;
 export const auth = getAuth(app);
 
 // Initialize analytics if supported
@@ -35,14 +49,23 @@ async function testConnection() {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error: any) {
     if (error?.message?.includes('the client is offline') || error?.code === 'unavailable') {
-      // Offline / reconnecting status is handled automatically by Firestore client
       console.warn("Firestore is operating with offline persistence until connection stabilizes.");
     } else {
       console.warn("Firestore connection check:", error?.message || error);
     }
   }
 }
-testConnection();
+
+// Run connection validation after page hydration
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'complete') {
+    setTimeout(testConnection, 1000);
+  } else {
+    window.addEventListener('load', () => setTimeout(testConnection, 1000), { once: true });
+  }
+} else {
+  testConnection();
+}
 
 export enum OperationType {
   CREATE = 'create',

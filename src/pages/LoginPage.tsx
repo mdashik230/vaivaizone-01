@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogIn, LogOut, Mail, ChevronRight, AlertCircle, ShieldCheck, UserCheck, RefreshCw, Copy, Check, ExternalLink, Globe } from 'lucide-react';
-import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { auth } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 
 export default function LoginPage() {
-  const { user, isAdmin, loading, logout } = useAuth();
+  const { user, isAdmin, loading, logout, loginWithGoogle } = useAuth();
   const { language } = useSettings();
   const [error, setError] = useState<string | null>(null);
   const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
@@ -20,6 +18,7 @@ export default function LoginPage() {
   const redirectParam = searchParams.get("redirect");
 
   const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
 
   // Redirect only if authorized admin or explicit customer redirect flow
   React.useEffect(() => {
@@ -33,25 +32,30 @@ export default function LoginPage() {
   }, [user, isAdmin, loading, navigate, redirectParam]);
 
   const handleGoogleLogin = async () => {
+    if (isLoggingIn) return;
     setIsLoggingIn(true);
     setError(null);
     setIsUnauthorizedDomain(false);
     try {
-      if (user) {
-        await auth.signOut();
-      }
-      const provider = new GoogleAuthProvider();
-      // Force account selection prompt so user can choose another Gmail
-      provider.setCustomParameters({ prompt: 'select_account' });
-      await signInWithPopup(auth, provider);
+      await loginWithGoogle();
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') {
+      const code = err?.code || '';
+      const message = err?.message || '';
+      if (
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/cancelled-popup-request' ||
+        message.includes('cancelled-popup-request') ||
+        message.includes('Pending promise was never set')
+      ) {
+        // Expected cancellation, ignore safely
         return;
       }
       console.error("Login Error Details:", err);
-      if (err.code === 'auth/unauthorized-domain' || (err.message && err.message.includes('unauthorized-domain'))) {
+      if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
         setIsUnauthorizedDomain(true);
         setError("Firebase Authorized Domain Error: এই ডোমেনটি Firebase Console এ অনুমোদিত নয়।");
+      } else if (code === 'auth/popup-blocked') {
+        setError(language === 'bn' ? 'ব্রাউজার পপ-আপ ব্লক করেছে। অনুগ্রহ করে পপ-আপ অনুমোদন করুন অথবা নতুন ট্যাবে খুলুন।' : 'Pop-up blocked by browser. Please allow pop-ups or open in a new tab.');
       } else {
         setError(err.message || "Login failed. Please try again.");
       }
@@ -176,6 +180,20 @@ export default function LoginPage() {
                   </div>
                   <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
                 </button>
+              )}
+
+              {isIframe && (
+                <div className="text-center pt-1">
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-900 font-medium transition-colors"
+                  >
+                    <ExternalLink size={13} />
+                    <span>{language === 'bn' ? 'লগইন পপ-আপে সমস্যা হলে নতুন ট্যাবে খুলুন' : 'Trouble with pop-ups? Open in new tab'}</span>
+                  </a>
+                </div>
               )}
 
               <AnimatePresence>
