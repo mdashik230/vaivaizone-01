@@ -6,8 +6,6 @@ import FeaturedProducts from "../components/FeaturedProducts";
 import SpecialOffers from "../components/SpecialOffers";
 import WhyChooseUs from "../components/WhyChooseUs";
 import Footer from "../components/Footer";
-import FloatingWhatsApp from "../components/FloatingWhatsApp";
-
 import PageTransition from "../components/PageTransition";
 
 export default function HomePage() {

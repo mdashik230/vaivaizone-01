@@ -465,7 +465,7 @@ export default function ProfilePage() {
                       name="name"
                       type="text" 
                       defaultValue={userProfile?.displayName || user?.displayName || ''} 
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100" 
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -474,7 +474,7 @@ export default function ProfilePage() {
                       type="email" 
                       disabled
                       defaultValue={user?.email || ''} 
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-sm opacity-50 cursor-not-allowed dark:text-neutral-400" 
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base opacity-50 cursor-not-allowed dark:text-neutral-400 font-medium" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -484,7 +484,7 @@ export default function ProfilePage() {
                       type="tel" 
                       defaultValue={userProfile?.phone || ''} 
                       placeholder="+8801234567890"
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100" 
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium" 
                     />
                   </div>
                   <div className="space-y-2">
@@ -493,7 +493,7 @@ export default function ProfilePage() {
                       name="dob"
                       type="date" 
                       defaultValue={userProfile?.dob || ''}
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-mono" 
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-mono font-medium" 
                     />
                   </div>
                 </div>

@@ -12,6 +12,7 @@ import { OrderProvider } from "./context/OrderContext";
 import { AdminProvider } from "./context/AdminContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import FloatingWhatsApp from "./components/FloatingWhatsApp";
+import WelcomePopup from "./components/WelcomePopup";
 import { AnimatePresence } from "motion/react";
 import { useAdmin } from "./context/AdminContext";
 import { Lock, LogOut, LogIn, ShieldCheck } from "lucide-react";
@@ -24,6 +25,7 @@ const CategoryPage = lazy(() => import("./pages/CategoryPage"));
 const SubCategoryPage = lazy(() => import("./pages/SubCategoryPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const ContactPage = lazy(() => import("./pages/ContactPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
 const ProductDetailsPage = lazy(() => import("./pages/ProductDetailsPage"));
 const AllCategoriesPage = lazy(() => import("./pages/AllCategoriesPage"));
 const AllProductsPage = lazy(() => import("./pages/AllProductsPage"));
@@ -33,10 +35,13 @@ const AdminPage = lazy(() => import("./pages/AdminPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const PaymentVerifyPage = lazy(() => import("./pages/PaymentVerifyPage"));
 
+import { ErrorBoundary } from "./components/ErrorBoundary";
+
 // Loading fallback component
 const PageLoader = () => (
-  <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
+  <div className="min-h-screen flex flex-col items-center justify-center bg-neutral-50 dark:bg-neutral-950 gap-4">
     <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+    <p className="text-xs font-bold text-neutral-400">লোড হচ্ছে...</p>
   </div>
 );
 
@@ -44,13 +49,19 @@ function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
   const { user, isAdmin, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) return null;
+  if (loading) {
+    return <PageLoader />;
+  }
 
   if (!user || !isAdmin) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return <>{children}</>;
+  return (
+    <ErrorBoundary>
+      {children}
+    </ErrorBoundary>
+  );
 }
 
 function AnimatedRoutes() {
@@ -71,6 +82,7 @@ function AnimatedRoutes() {
     { path: "/product/:productId", element: <ProductDetailsPage /> },
     { path: "/profile", element: <ProfilePage /> },
     { path: "/contact", element: <ContactPage /> },
+    { path: "/about", element: <AboutPage /> },
     { path: "/login", element: <LoginPage /> },
     { path: "/admin", element: <ProtectedAdminRoute><AdminPage /></ProtectedAdminRoute> },
   ]);
@@ -147,21 +159,24 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <Router>
-      <AuthProvider>
-        <AdminProvider>
-          <SettingsProvider>
-            <CartProvider>
-              <OrderProvider>
-                <ScrollToTop />
-                <AnimatedRoutes />
-                <BottomNav />
-                <FloatingWhatsApp />
-              </OrderProvider>
-            </CartProvider>
-          </SettingsProvider>
-        </AdminProvider>
-      </AuthProvider>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AuthProvider>
+          <AdminProvider>
+            <SettingsProvider>
+              <CartProvider>
+                <OrderProvider>
+                  <ScrollToTop />
+                  <WelcomePopup />
+                  <AnimatedRoutes />
+                  <BottomNav />
+                  <FloatingWhatsApp />
+                </OrderProvider>
+              </CartProvider>
+            </SettingsProvider>
+          </AdminProvider>
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
   );
 }

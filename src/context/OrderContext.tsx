@@ -41,6 +41,7 @@ export interface Order {
   // UddoktaPay Fields
   uddoktaPayInvoiceId?: string;
   uddoktaPayStatus?: string;
+  paymentGatewayUrl?: string;
 }
 
 interface OrderContextType {
@@ -82,7 +83,7 @@ export const OrderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, (error) => handleFirestoreError(error, OperationType.LIST, "orders"));
 
     return () => unsubscribe();
-  }, [user, isAdmin, loading]);
+  }, [user?.uid, isAdmin, loading]);
 
   const addOrder = async (orderData: Omit<Order, 'id'>) => {
     if (!user) throw new Error("User must be logged in to place an order");
@@ -98,7 +99,8 @@ export const OrderProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await setDoc(doc(db, "orders", id), newOrder);
       return id;
     } catch (error) {
-      return handleFirestoreError(error, OperationType.CREATE, `orders/${id}`);
+      handleFirestoreError(error, OperationType.CREATE, `orders/${id}`);
+      throw error;
     }
   };
 

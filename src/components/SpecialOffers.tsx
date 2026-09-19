@@ -37,6 +37,8 @@ export default function SpecialOffers() {
               <img 
                 src={offer.image || "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1200&q=80"} 
                 alt={offer.title} 
+                loading="lazy"
+                decoding="async"
                 className="w-full h-full object-cover absolute inset-0 transition-transform duration-700 group-hover:scale-105"
               />
               {/* Vibrant, balanced overlay so content pops brightly without dimming the button */}

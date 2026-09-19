@@ -4,8 +4,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { useCart } from "../context/CartContext";
 import { useSettings } from "../context/SettingsContext";
-
 import { useAdmin } from "../context/AdminContext";
+import { useKeyboardStatus } from "../hooks/useKeyboardStatus";
 
 export default function BottomNav() {
   const { pathname } = useLocation();
@@ -14,6 +14,7 @@ export default function BottomNav() {
   const { t, language } = useSettings();
   const { contactInfo } = useAdmin();
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const isKeyboardOpen = useKeyboardStatus();
 
   const navItems = [
     { name: t("home"), path: "/", icon: <Home size={20} /> },
@@ -41,14 +42,19 @@ export default function BottomNav() {
     navigate(path);
   };
 
+  // Only hide bottom nav on admin portal
   if (pathname.startsWith('/admin')) {
     return null;
   }
 
   return (
     <>
-      {/* Bottom Nav Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-lg border-t border-neutral-200 dark:border-neutral-800 z-50 lg:hidden px-2 pb-safe font-sans">
+      {/* Bottom Nav Bar - Hides cleanly when mobile virtual keyboard is open so it never floats above keyboard */}
+      <nav 
+        className={`fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-lg border-t border-neutral-200 dark:border-neutral-800 z-50 lg:hidden px-2 pb-safe font-sans transition-all duration-200 ${
+          isKeyboardOpen ? 'translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+        }`}
+      >
         <div className="flex items-center justify-around h-16">
           {navItems.map((item) => {
             const isActive = pathname === item.path;

@@ -133,13 +133,14 @@ export default function Header() {
           onClick={() => setIsMenuOpen(true)}
           className="hidden lg:flex text-neutral-600 dark:text-neutral-400 p-1 hover:text-primary transition-colors" 
           id="mobile-menu-btn"
+          aria-label="Open navigation menu"
         >
           <Menu size={24} />
         </button>
 
         {/* Logo */}
         <div className="flex-shrink-0">
-          <Link to="/">
+          <Link to="/" aria-label="Vai Vai Zone Home">
             <h1 className="text-2xl md:text-3xl font-display font-bold text-primary tracking-tighter">
               Vai Vai<span className="text-neutral-900 dark:text-white transition-colors"> Zone</span>
             </h1>
@@ -159,13 +160,15 @@ export default function Header() {
                 onChange={handleSearchChange}
                 onFocus={handleSearchFocus}
                 placeholder={t("search_placeholder")} 
-                className="w-full bg-neutral-100 dark:bg-neutral-800 border-none rounded-full py-2.5 pl-12 pr-10 focus:ring-2 focus:ring-primary/20 outline-none transition-colors text-sm dark:text-neutral-100"
+                className="w-full bg-neutral-100 dark:bg-neutral-800 border-none rounded-full py-2.5 pl-12 pr-10 focus:ring-2 focus:ring-primary/20 outline-none transition-colors text-base md:text-sm dark:text-neutral-100"
                 id="desktop-search"
+                aria-label="পণ্য খুঁজুন (Search products)"
               />
               {searchQuery && (
                 <button 
                   onClick={() => {setSearchQuery(""); setShowResults(false);}} 
                   className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 p-1"
+                  aria-label="Clear search"
                 >
                   <X size={16} />
                 </button>
@@ -195,7 +198,7 @@ export default function Header() {
                       className="w-full flex items-center gap-4 px-4 py-3 hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors text-left group"
                     >
                       <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-neutral-100 dark:border-neutral-800">
-                        <img src={product.image || undefined} alt="" className="w-full h-full object-cover" />
+                        <img src={product.image || undefined} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                       </div>
                       <div className="flex-grow">
                         <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-sm line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h4>
@@ -211,14 +214,14 @@ export default function Header() {
 
         {/* Icons - Tablet/Desktop Only */}
         <div className="hidden md:flex items-center gap-3 md:gap-6">
-          <Link to="/profile" className="relative group flex flex-col items-center text-neutral-600 dark:text-neutral-400 hover:text-primary transition-colors">
+          <Link to="/profile" aria-label="ইউজার প্রোফাইল" className="relative group flex flex-col items-center text-neutral-600 dark:text-neutral-400 hover:text-primary transition-colors">
             <div className="relative">
               <User size={22} />
             </div>
             <span className="hidden sm:block text-[10px] font-medium uppercase mt-0.5">{language === 'bn' ? 'প্রোফাইল' : 'Profile'}</span>
           </Link>
           
-          <Link to="/cart" className="flex flex-col items-center text-neutral-600 dark:text-neutral-400 hover:text-primary transition-colors relative group">
+          <Link to="/cart" aria-label="শপিং কার্ট" className="flex flex-col items-center text-neutral-600 dark:text-neutral-400 hover:text-primary transition-colors relative group">
             <div className="relative group-hover:scale-110 transition-transform">
               <ShoppingCart size={22} />
               {cartCount > 0 && (
@@ -245,12 +248,14 @@ export default function Header() {
               onChange={handleSearchChange}
               onFocus={handleSearchFocus}
               placeholder={t("search_placeholder")} 
-              className="w-full bg-neutral-100 dark:bg-neutral-800 border-none rounded-2xl py-2.5 pl-10 pr-10 outline-none text-sm dark:text-neutral-100 transition-colors"
+              aria-label="পণ্য খুঁজুন (Search products)"
+              className="w-full bg-neutral-100 dark:bg-neutral-800 border-none rounded-2xl py-2.5 pl-10 pr-10 outline-none text-base dark:text-neutral-100 transition-colors"
             />
             {searchQuery && (
               <button 
                 onClick={() => {setSearchQuery(""); setShowResults(false);}} 
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 p-1"
+                aria-label="Clear search"
               >
                 <X size={14} />
               </button>
@@ -278,7 +283,7 @@ export default function Header() {
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-left"
                     >
-                      <img src={product.image || undefined} alt="" className="w-8 h-8 rounded-md object-cover" />
+                      <img src={product.image || undefined} alt={product.name} loading="lazy" decoding="async" className="w-8 h-8 rounded-md object-cover" />
                       <div>
                         <h4 className="font-bold text-neutral-800 dark:text-neutral-200 text-xs line-clamp-1">{product.name}</h4>
                         <p className="text-[10px] text-neutral-500">৳{product.price}</p>
@@ -321,6 +326,7 @@ export default function Header() {
                 <button 
                   onClick={() => setIsMenuOpen(false)}
                   className="bg-neutral-100 dark:bg-neutral-800 p-2 rounded-full text-neutral-500 dark:text-neutral-400"
+                  aria-label="Close menu"
                 >
                   <X size={20} />
                 </button>
@@ -363,7 +369,7 @@ export default function Header() {
                             className="flex items-center gap-4 p-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 hover:border-primary/30 hover:bg-primary/5 transition-all group"
                           >
                             <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 border border-neutral-100 dark:border-neutral-800">
-                              <img src={category.image || "https://images.unsplash.com/photo-1546054452-963030310217?auto=format&fit=crop&q=80&w=1200"} alt="" className="w-full h-full object-cover" />
+                              <img src={category.image || "https://images.unsplash.com/photo-1546054452-963030310217?auto=format&fit=crop&q=80&w=1200"} alt={category.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                             </div>
                             <div className="flex-grow">
                               <h4 className="font-bold text-neutral-800 dark:text-neutral-200 group-hover:text-primary transition-colors">{category.name}</h4>

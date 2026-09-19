@@ -40,7 +40,8 @@ export default function HeroSlider() {
           <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-transparent z-10" />
           <img 
             src={sliders[current]?.image || undefined} 
-            alt={sliders[current]?.title}
+            alt={sliders[current]?.title || 'Hero Banner'}
+            decoding="async"
             className="w-full h-full object-cover scale-105"
           />
           <div className="absolute inset-0 z-20 flex flex-col justify-center items-start px-8 md:px-16 lg:px-32">
@@ -82,12 +83,14 @@ export default function HeroSlider() {
 
       <button 
         onClick={prevSlide}
+        aria-label="Previous slide"
         className="absolute left-4 top-1/2 -translate-y-1/2 z-30 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full backdrop-blur-md transition-all hidden md:block"
       >
         <ChevronLeft size={24} />
       </button>
       <button 
         onClick={nextSlide}
+        aria-label="Next slide"
         className="absolute right-4 top-1/2 -translate-y-1/2 z-30 bg-white/20 hover:bg-white/40 text-white p-2 rounded-full backdrop-blur-md transition-all hidden md:block"
       >
         <ChevronRight size={24} />
@@ -98,6 +101,7 @@ export default function HeroSlider() {
           <button
             key={slider.id}
             onClick={() => setCurrent(i)}
+            aria-label={`Go to slide ${i + 1}`}
             className={`w-2.5 h-2.5 rounded-full transition-all ${
               i === current ? "bg-primary w-8" : "bg-white/50"
             }`}

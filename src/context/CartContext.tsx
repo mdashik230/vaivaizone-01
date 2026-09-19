@@ -83,7 +83,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`));
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user?.uid]);
 
   // Save guest wishlist to local storage
   useEffect(() => {

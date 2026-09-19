@@ -2,14 +2,17 @@ import { MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
 import { useLocation } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
+import { useKeyboardStatus } from "../hooks/useKeyboardStatus";
 
 export default function FloatingWhatsApp() {
   const { pathname } = useLocation();
   const { contactInfo } = useAdmin();
+  const isKeyboardOpen = useKeyboardStatus();
   const rawNumber = contactInfo.whatsappNumber || contactInfo.phone;
   const waNumber = rawNumber.replace(/[^0-9]/g, '');
   
-  if (pathname.startsWith('/admin') || !waNumber) return null;
+  // Only display the floating WhatsApp support button on the Home page ('/') and hide when keyboard is open
+  if (pathname !== '/' || !waNumber || isKeyboardOpen) return null;
 
   return (
     <motion.a

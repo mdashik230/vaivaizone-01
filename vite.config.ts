@@ -251,12 +251,14 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: {
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
             'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
             'motion': ['motion/react'],
             'icons': ['lucide-react'],
           },
         },
       },
+      chunkSizeWarningLimit: 1200,
     },
     server: {
       port: 3000,

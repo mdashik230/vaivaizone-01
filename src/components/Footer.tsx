@@ -18,22 +18,33 @@ export default function Footer() {
               Your one-stop destination for the best tech and fashion in Bangladesh. Quality products, fast delivery, and unbeatable prices.
             </p>
             <div className="flex flex-wrap gap-4">
-              <a href={contactInfo.supportLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-blue-600 transition-colors">
-                <Facebook size={20} />
-              </a>
-              <a href={`https://wa.me/${(contactInfo.whatsappNumber || "").replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-green-600 transition-colors">
-                <MessageCircle size={20} />
-              </a>
-              <a href={contactInfo.telegramLink || "#"} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-sky-500 transition-colors">
-                <Send size={20} />
-              </a>
+              {(contactInfo.facebookPageLink || contactInfo.supportLink) && (
+                <a href={contactInfo.facebookPageLink || contactInfo.supportLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-blue-600 transition-colors" title="Facebook Page" aria-label="Vai Vai Zone Facebook Page">
+                  <Facebook size={20} />
+                </a>
+              )}
+              {contactInfo.instagramLink && (
+                <a href={contactInfo.instagramLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-pink-600 transition-colors" title="Instagram" aria-label="Vai Vai Zone Instagram">
+                  <Instagram size={20} />
+                </a>
+              )}
+              {contactInfo.whatsappNumber && (
+                <a href={`https://wa.me/${(contactInfo.whatsappNumber || "").replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-green-600 transition-colors" title="WhatsApp" aria-label="Chat on WhatsApp">
+                  <MessageCircle size={20} />
+                </a>
+              )}
+              {contactInfo.telegramLink && (
+                <a href={contactInfo.telegramLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-sky-500 transition-colors" title="Telegram" aria-label="Join our Telegram channel">
+                  <Send size={20} />
+                </a>
+              )}
               {contactInfo.youtubeLink && (
-                <a href={contactInfo.youtubeLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-red-600 transition-colors">
+                <a href={contactInfo.youtubeLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-red-600 transition-colors" title="YouTube" aria-label="Vai Vai Zone YouTube Channel">
                   <Youtube size={20} />
                 </a>
               )}
               {contactInfo.tiktokLink && (
-                <a href={contactInfo.tiktokLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-black transition-colors flex items-center justify-center">
+                <a href={contactInfo.tiktokLink} target="_blank" rel="noopener noreferrer" className="bg-white/10 p-2.5 rounded-full hover:bg-black transition-colors flex items-center justify-center" title="TikTok" aria-label="Vai Vai Zone TikTok">
                   <Music size={20} />
                 </a>
               )}
@@ -44,10 +55,9 @@ export default function Footer() {
           <div>
             <h4 className="text-lg font-bold mb-6">Quick Links</h4>
             <ul className="space-y-4 text-neutral-400">
-              <li><Link to="/contact" className="hover:text-primary transition-colors">About Us</Link></li>
+              <li><Link to="/about" className="hover:text-primary transition-colors">About Us</Link></li>
               <li><Link to="/contact" className="hover:text-primary transition-colors">Contact Us</Link></li>
               <li><Link to="/profile" className="hover:text-primary transition-colors">My Profile</Link></li>
-              <li><Link to="/admin" className="hover:text-primary transition-colors flex items-center gap-1.5 text-neutral-500 hover:text-primary"><ShieldCheck size={14} /> Admin Portal</Link></li>
             </ul>
           </div>
 

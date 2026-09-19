@@ -7,7 +7,6 @@ import {
   CreditCard, Check, CornerDownRight, MessageSquare
 } from "lucide-react";
 import Header from "../components/Header";
-import Footer from "../components/Footer";
 import { useAdmin } from "../context/AdminContext";
 import { useCart } from "../context/CartContext";
 import { useSettings } from "../context/SettingsContext";
@@ -580,8 +579,6 @@ export default function PaymentVerifyPage() {
           )}
         </div>
       </main>
-
-      <Footer />
     </div>
   );
 }

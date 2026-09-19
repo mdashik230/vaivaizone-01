@@ -3,7 +3,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ChevronLeft, ShoppingCart, Heart, Share2, Star, Minus, Plus, ShoppingBag, ShieldCheck, Truck, RotateCcw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Header from "../components/Header";
-import Footer from "../components/Footer";
 import { useSettings } from "../context/SettingsContext";
 import { useCart } from "../context/CartContext";
 import { useAdmin } from "../context/AdminContext";
@@ -61,7 +60,6 @@ export default function ProductDetailsPage() {
             {t("back_to_page")}
           </button>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -281,6 +279,7 @@ export default function ProductDetailsPage() {
                     <div className="flex items-center bg-neutral-100 dark:bg-neutral-800 rounded-2xl p-1 border border-neutral-200 dark:border-neutral-700">
                       <button 
                         onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                        aria-label="পরিমাণ কমান (Decrease quantity)"
                         className="w-10 h-10 flex items-center justify-center text-neutral-500 hover:text-primary transition-colors"
                       >
                         <Minus size={18} />
@@ -288,6 +287,7 @@ export default function ProductDetailsPage() {
                       <span className="w-12 text-center font-bold text-neutral-800 dark:text-white">{quantity}</span>
                       <button 
                         onClick={() => setQuantity(quantity + 1)}
+                        aria-label="পরিমাণ বাড়ান (Increase quantity)"
                         className="w-10 h-10 flex items-center justify-center text-neutral-500 hover:text-primary transition-colors"
                       >
                         <Plus size={18} />
@@ -316,6 +316,7 @@ export default function ProductDetailsPage() {
                 </button>
                 <button 
                   onClick={() => toggleWishlist(product.id)}
+                  aria-label={isWishlisted ? "উইশলিস্ট থেকে মুছুন" : "উইশলিস্টে যুক্ত করুন"}
                   className={`w-16 h-16 rounded-[1.5rem] border flex items-center justify-center transition-all ${
                     isWishlisted 
                       ? "border-red-500 bg-red-50 text-red-500 shadow-lg shadow-red-500/10" 
@@ -489,8 +490,6 @@ export default function ProductDetailsPage() {
           </div>
         </div>
       </main>
-
-      <Footer />
     </div>
   );
 }

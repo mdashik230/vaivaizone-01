@@ -1,6 +1,5 @@
 import React from "react";
 import Header from "../components/Header";
-import Footer from "../components/Footer";
 import { MessageCircle, PhoneCall, Send, Mail, MapPin, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useSettings } from "../context/SettingsContext";
@@ -125,9 +124,6 @@ export default function ContactPage() {
           </div>
         </div>
       </main>
-
-
-      <Footer />
     </div>
   );
 }

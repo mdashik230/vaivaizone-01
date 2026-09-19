@@ -8,7 +8,7 @@ import {
   Save, X, ChevronRight, ChevronDown, Package, DollarSign, Users,
   Globe, Mail, MapPin, CreditCard, Camera, Menu, Lock,
   Shirt, ShoppingBasket, ImagePlus, Truck, Printer, Store,
-  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, RefreshCw, Search, Calculator, AlertCircle
+  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, Facebook, RefreshCw, Search, Calculator, AlertCircle, BellRing, Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
@@ -18,7 +18,7 @@ import { sendTelegramNotification } from '../utils/telegram';
 import { useOrders, Order } from '../context/OrderContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings } from '../types';
 import { 
   createSteadfastOrder, 
   getSteadfastBalance, 
@@ -36,7 +36,7 @@ import { compressImageFile } from '../utils/imageCompressor';
 import PageTransition from "../components/PageTransition";
 import { LogOut } from 'lucide-react';
 
-type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'messages' | 'telegram' | 'steadfast' | 'payment-gateway' | 'users' | 'social-links';
+type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'popup' | 'messages' | 'telegram' | 'steadfast' | 'payment-gateway' | 'users' | 'social-links';
 
 const parseSafePrice = (price: any): number => {
   if (typeof price === 'number') return isNaN(price) ? 0 : Math.max(0, price);
@@ -63,28 +63,44 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [orderFilter, setOrderFilter] = useState<'All' | 'Pending' | 'Completed' | 'Cancelled'>('All');
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [usersList, setUsersList] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || !user) return;
     
-    const q = query(collection(db, "users"), orderBy("lastLogin", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUsersList(users);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, "users"));
-    return () => unsubscribe();
-  }, [isAdmin]);
+    let isMounted = true;
+    let unsubscribe = () => {};
+    
+    try {
+      const q = query(collection(db, "users"));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!isMounted) return;
+        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        users.sort((a: any, b: any) => ((b.lastLogin?.seconds || 0) - (a.lastLogin?.seconds || 0)));
+        setUsersList(users);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, "users");
+      });
+    } catch (e) {
+      console.warn("User list listener initialization warning:", e);
+    }
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [isAdmin, user?.uid]);
   
   const { 
-    products, categories, sliders, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, scrollingMessage, contactInfo, shippingSettings,
+    products, categories, sliders, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, welcomePopupSettings, scrollingMessage, contactInfo, shippingSettings,
     setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider,
     addProduct, updateProduct, removeProduct, 
     addCategory, updateCategory, removeCategory,
     addOffer, updateOffer, removeOffer,
-    setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings
+    setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings, setWelcomePopupSettings
   } = useAdmin();
   const { orders, updateOrderStatus, updateOrder } = useOrders();
   const { language } = useSettings();
@@ -100,12 +116,15 @@ export default function AdminPage() {
   const [editingSubcategory, setEditingSubcategory] = useState<{sub: Partial<Subcategory>, parentId: string} | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
+  const [invoiceCopyMode, setInvoiceCopyMode] = useState<'dual' | 'single'>('dual');
   const [isDownloading, setIsDownloading] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
 
   const [localTelegram, setLocalTelegram] = useState<TelegramSettings | null>(null);
   const [localSteadfast, setLocalSteadfast] = useState<SteadfastSettings | null>(null);
   const [localUddoktaPay, setLocalUddoktaPay] = useState<UddoktaPaySettings | null>(null);
+  const [localWelcomePopup, setLocalWelcomePopup] = useState<WelcomePopupSettings | null>(null);
+  const [isSavingWelcomePopup, setIsSavingWelcomePopup] = useState(false);
   const [localContactInfo, setLocalContactInfo] = useState<ContactInfo | null>(null);
   const [localShippingSettings, setLocalShippingSettings] = useState<ShippingSettings | null>(null);
   const [localScrollingMessage, setLocalScrollingMessage] = useState<string>('');
@@ -173,7 +192,22 @@ export default function AdminPage() {
     if (contactInfo && !localContactInfo) setLocalContactInfo(contactInfo);
     if (shippingSettings && !localShippingSettings) setLocalShippingSettings(shippingSettings);
     if (scrollingMessage && !localScrollingMessage) setLocalScrollingMessage(scrollingMessage);
-  }, [telegramSettings, steadfastSettings, uddoktaPaySettings, contactInfo, shippingSettings, scrollingMessage]);
+    if (welcomePopupSettings && !localWelcomePopup) setLocalWelcomePopup(welcomePopupSettings);
+  }, [telegramSettings, steadfastSettings, uddoktaPaySettings, contactInfo, shippingSettings, scrollingMessage, welcomePopupSettings]);
+
+  // Auto-fetch Steadfast balance when visiting Steadfast tab if credentials exist
+  useEffect(() => {
+    if (activeTab === 'steadfast' && localSteadfast?.apiKey && localSteadfast?.secretKey && steadfastBalance === null) {
+      getSteadfastBalance({ apiKey: localSteadfast.apiKey, secretKey: localSteadfast.secretKey })
+        .then(res => {
+          const numBal = res.current_balance !== undefined && res.current_balance !== null ? Number(res.current_balance) : null;
+          if (res.status === 200 && numBal !== null && !isNaN(numBal)) {
+            setSteadfastBalance(numBal);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeTab, localSteadfast?.apiKey, localSteadfast?.secretKey, steadfastBalance]);
 
   const handleTestUddoktaPay = async () => {
     if (!localUddoktaPay?.apiKey) {
@@ -231,13 +265,15 @@ export default function AdminPage() {
     setTestingSteadfast(true);
     try {
       const res = await getSteadfastBalance({ apiKey, secretKey });
-      if (res.status === 200 && typeof res.current_balance === 'number') {
-        setSteadfastBalance(res.current_balance);
-        showNotification(`সংযোগ সফল! বর্তমান মার্চেন্ট ব্যালেন্স: ৳${res.current_balance}`, 'success');
+      const rawBal = res.current_balance;
+      const numBal = rawBal !== undefined && rawBal !== null ? Number(rawBal) : null;
+      if (res.status === 200 && numBal !== null && !isNaN(numBal)) {
+        setSteadfastBalance(numBal);
+        showNotification(`সংযোগ সফল! বর্তমান মার্চেন্ট ব্যালেন্স: ৳${numBal.toLocaleString()}`, 'success');
       } else if (res.status === 200) {
-        showNotification('Steadfast API সফলভাবে কানেক্টেড! ✅', 'success');
+        showNotification('সংযোগ সফল, তবে অ্যাকাউন্টে ব্যালেন্স পাওয়া যায়নি।', 'success');
       } else if (res.status === 401) {
-        showNotification('ভুল ক্রেডেনশিয়াল (Unauthorized): API Key বা Secret Key সঠিক নয়। দয়া করে পোর্টাল থেকে সঠিক কি কপি করুন।', 'error');
+        showNotification('ভুল ক্রেডেনশিয়াল (Unauthorized): API Key বা Secret Key সঠিক নয়। দয়া করে Steadfast পোর্টাল থেকে সঠিক কী কপি করুন।', 'error');
       } else {
         showNotification(res.message || 'Steadfast কানেকশন ব্যর্থ হয়েছে। কী ও সিক্রেট চেক করুন।', 'error');
       }
@@ -265,10 +301,10 @@ export default function AdminPage() {
   const openDispatchModal = (order: Order) => {
     const isCod = order.paymentMethod === 'Cash on Delivery';
     setDispatchForm({
-      name: order.customerInfo.name || '',
-      phone: order.customerInfo.phone || '',
-      address: `${order.customerInfo.address || ''}${order.customerInfo.area ? ', ' + order.customerInfo.area : ''}`,
-      codAmount: isCod ? order.total : 0,
+      name: order.customerInfo?.name || '',
+      phone: order.customerInfo?.phone || '',
+      address: `${order.customerInfo?.address || ''}${order.customerInfo?.area ? ', ' + order.customerInfo.area : ''}`,
+      codAmount: isCod ? (order.total || 0) : 0,
       note: steadfastSettings?.defaultNote || 'Handle with Care',
     });
     setDispatchingOrder(order);
@@ -432,84 +468,186 @@ export default function AdminPage() {
   };
 
    const downloadInvoice = async () => {
-     if (!invoiceRef.current || !selectedOrder) return;
+     if (!selectedOrder) return;
      
      setIsDownloading(true);
      showNotification('ইনভয়েস প্রিপেয়ার হচ্ছে...');
      
      try {
-        const element = invoiceRef.current;
+        // Pre-load and await Bengali font in browser memory for crisp rendering
+        if (document.fonts) {
+          try {
+            await document.fonts.load('14px "Hind Siliguri"');
+            await document.fonts.load('bold 14px "Hind Siliguri"');
+            await document.fonts.ready;
+          } catch (fontErr) {
+            console.warn('Font loading check non-blocking:', fontErr);
+          }
+        }
+
+        const element = document.getElementById('invoice-print-container') || invoiceRef.current;
+        if (!element) {
+          throw new Error('Invoice element not found');
+        }
         
-        // Use a 100ms timeout to ensure UI state for "downloading" is rendered
+        // Ensure UI frame is rendered
         await new Promise(resolve => setTimeout(resolve, 100));
 
-        const canvas = await html2canvas(element, {
-           scale: 2,
-           useCORS: true,
-           logging: false,
-           backgroundColor: '#ffffff',
-           onclone: (clonedDoc) => {
-              // CRITICAL: html2canvas 1.4.1 doesn't support modern CSS color functions (oklch, oklab, color-mix).
-              // We must sanitize all <style> tags and inline styles to prevent the parser from crashing.
-              
-              // 1. Sanitize all <style> tags with a robust regex that handles nested parentheses
-              const modernColorRegex = /(oklch|oklab|color-mix)\s*\((?:[^()]+|\([^()]*\))*\)/g;
-              
-              Array.from(clonedDoc.querySelectorAll('style')).forEach(styleTag => {
-                if (styleTag.textContent && (styleTag.textContent.includes('oklch') || styleTag.textContent.includes('oklab') || styleTag.textContent.includes('color-mix'))) {
-                  styleTag.textContent = styleTag.textContent.replace(modernColorRegex, '#000000');
+        let pdfSuccess = false;
+
+        // Strategy 1: html2canvas with complete Bengali font inclusion & CSS isolation from oklch
+        try {
+          const canvas = await html2canvas(element, {
+             scale: 2,
+             useCORS: true,
+             logging: false,
+             backgroundColor: '#ffffff',
+             onclone: (clonedDoc) => {
+                // Remove all stylesheets with oklch / color-mix to avoid parser crash in production, but keep Google Fonts
+                clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(l => {
+                  const href = l.getAttribute('href') || '';
+                  if (!href.includes('fonts.googleapis.com')) {
+                    l.remove();
+                  }
+                });
+                clonedDoc.querySelectorAll('style').forEach(s => {
+                  if (s.textContent && (s.textContent.includes('oklch') || s.textContent.includes('color-mix'))) {
+                    s.remove();
+                  }
+                });
+
+                // Inject a clean, modern, pure-standard stylesheet with Bengali font
+                const cleanStyle = clonedDoc.createElement('style');
+                cleanStyle.textContent = `
+                  @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
+                  * { 
+                    box-sizing: border-box !important; 
+                    margin: 0; 
+                    padding: 0; 
+                    font-family: 'Hind Siliguri', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; 
+                    -webkit-font-smoothing: antialiased;
+                  }
+                  body { background: #ffffff !important; color: #111827 !important; }
+                  #invoice-print-container { 
+                    width: 720px !important; 
+                    background: #ffffff !important; 
+                    color: #111827 !important; 
+                    padding: 10px !important;
+                    margin: 0 auto !important;
+                    display: block !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;
+                    position: static !important;
+                  }
+                  .invoice-slip {
+                    width: 100% !important;
+                    background: #ffffff !important;
+                    border: 1px solid #e5e7eb !important;
+                    border-radius: 6px !important;
+                    padding: 10px 14px !important;
+                    margin-bottom: 4px !important;
+                    box-sizing: border-box !important;
+                  }
+                  .flex { display: flex !important; }
+                  .justify-between { justify-content: space-between !important; }
+                  .justify-end { justify-content: flex-end !important; }
+                  .justify-center { justify-content: center !important; }
+                  .items-start { align-items: flex-start !important; }
+                  .items-center { align-items: center !important; }
+                  .grid { display: grid !important; }
+                  .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+                  .gap-2 { gap: 8px !important; }
+                  .gap-3 { gap: 12px !important; }
+                  .gap-4 { gap: 16px !important; }
+                  .border-b { border-bottom: 1px solid #e5e7eb !important; }
+                  .border-t { border-top: 1px solid #e5e7eb !important; }
+                  .border-t-2 { border-top: 2px dashed #d1d5db !important; }
+                  .pb-2 { padding-bottom: 8px !important; }
+                  .pt-2 { padding-top: 8px !important; }
+                  .text-left { text-align: left !important; }
+                  .text-right { text-align: right !important; }
+                  .text-center { text-align: center !important; }
+                  .font-bold { font-weight: 700 !important; }
+                  .font-black { font-weight: 900 !important; }
+                  .font-medium { font-weight: 500 !important; }
+                  .font-semibold { font-weight: 600 !important; }
+                  .text-primary { color: #ff4e00 !important; }
+                  .text-neutral-900 { color: #111827 !important; }
+                  .text-neutral-800 { color: #1f2937 !important; }
+                  .text-neutral-700 { color: #374151 !important; }
+                  .text-neutral-600 { color: #4b5563 !important; }
+                  .text-neutral-500 { color: #6b7280 !important; }
+                  .text-neutral-400 { color: #9ca3af !important; }
+                  .text-green-700 { color: #15803d !important; }
+                  .text-orange-700 { color: #c2410c !important; }
+                  .text-amber-800 { color: #92400e !important; }
+                  .text-amber-600 { color: #d97706 !important; }
+                  .text-blue-700 { color: #1d4ed8 !important; }
+                  .bg-neutral-50 { background-color: #f9fafb !important; }
+                  .bg-neutral-100 { background-color: #f3f4f6 !important; }
+                  .bg-green-100 { background-color: #dcfce7 !important; }
+                  .bg-orange-100 { background-color: #ffedd5 !important; }
+                  .bg-amber-50 { background-color: #fffbeb !important; }
+                  .bg-blue-50 { background-color: #eff6ff !important; }
+                  .border-amber-200 { border-color: #fde68a !important; }
+                  .rounded { border-radius: 4px !important; }
+                  .rounded-md { border-radius: 6px !important; }
+                  .rounded-lg { border-radius: 8px !important; }
+                  .rounded-xl { border-radius: 12px !important; }
+                  table { width: 100% !important; border-collapse: collapse !important; }
+                  th { padding: 3px 5px !important; border-bottom: 1px solid #e5e7eb !important; font-size: 9.5px !important; color: #6b7280 !important; text-align: left !important; }
+                  td { padding: 3px 5px !important; border-bottom: 1px solid #f3f4f6 !important; font-size: 10.5px !important; }
+                  .no-print { display: none !important; }
+                `;
+                clonedDoc.head.appendChild(cleanStyle);
+
+                const clonedTarget = clonedDoc.getElementById('invoice-print-container');
+                if (clonedTarget) {
+                  clonedTarget.style.position = 'static';
+                  clonedTarget.style.visibility = 'visible';
+                  clonedTarget.style.opacity = '1';
+                  clonedTarget.style.display = 'block';
                 }
-              });
+             }
+          });
 
-              // 2. Sanitize the target element and its children
-              const el = clonedDoc.querySelector('.print-invoice') as HTMLElement;
-              if (el) {
-                 el.style.maxHeight = 'none';
-                 el.style.overflow = 'visible';
-                 el.style.borderRadius = '0';
-                 el.style.boxShadow = 'none';
-                 el.style.backgroundColor = '#ffffff';
-                 el.style.color = '#000000';
-                 
-                 // Deep sanitize all elements for any inline styles or remaining modern colors
-                 const allElements = el.querySelectorAll('*');
-                 allElements.forEach(item => {
-                    const node = item as HTMLElement;
-                    
-                    // Check inline style attribute directly
-                    const inlineStyle = node.getAttribute('style') || '';
-                    if (inlineStyle.includes('oklch') || inlineStyle.includes('oklab') || inlineStyle.includes('color-mix')) {
-                        node.setAttribute('style', inlineStyle.replace(modernColorRegex, '#000000'));
-                    }
-                    
-                    // Also explicitly override common properties if they still seem to have issues
-                    // (useful if they were set via CSS variables that the regex might have missed)
-                    try {
-                      const computed = window.getComputedStyle(node);
-                      if (computed.color.includes('oklch') || computed.color.includes('oklab')) node.style.color = '#000000';
-                      if (computed.backgroundColor.includes('oklch') || computed.backgroundColor.includes('oklab')) node.style.backgroundColor = 'transparent';
-                      if (computed.borderColor.includes('oklch') || computed.borderColor.includes('oklab')) node.style.borderColor = '#eeeeee';
-                    } catch (e) {
-                      // ignore computed style errors
-                    }
-                 });
-              }
-              const noPrint = clonedDoc.querySelectorAll('.no-print');
-              noPrint.forEach(item => (item as HTMLElement).style.display = 'none');
-           }
-        });
+          const imgData = canvas.toDataURL('image/jpeg', 0.98);
 
-        const imgData = canvas.toDataURL('image/jpeg', 1.0);
-        const pdf = new (jsPDF as any)('p', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-        
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-        pdf.save(`Invoice-${selectedOrder.id}.pdf`);
-        showNotification('ইনভয়েস ডাউনলোড সফল হয়েছে');
+          if (invoiceCopyMode === 'dual') {
+            // Standard A4 PDF (210mm x 297mm) containing 2 slips with cut line
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = 196;
+            const pdfPageHeight = 297;
+            const contentHeight = (canvas.height * pdfWidth) / canvas.width;
+            
+            const yOffset = contentHeight < pdfPageHeight ? Math.max(5, (pdfPageHeight - contentHeight) / 2) : 5;
+            pdf.addImage(imgData, 'JPEG', 7, yOffset, pdfWidth, Math.min(contentHeight, pdfPageHeight - 10));
+            pdf.save(`Invoice-A4-2x-${selectedOrder.id.slice(-8)}.pdf`);
+          } else {
+            // Single Slip: A5 Landscape format (210mm x 148mm) - exactly half A4!
+            const pdf = new jsPDF('l', 'mm', 'a5'); // 210 x 148 mm
+            const pdfWidth = 196;
+            const pdfHeight = 148;
+            const contentHeight = (canvas.height * pdfWidth) / canvas.width;
+            const yOffset = contentHeight < pdfHeight ? Math.max(4, (pdfHeight - contentHeight) / 2) : 4;
+            pdf.addImage(imgData, 'JPEG', 7, yOffset, pdfWidth, Math.min(contentHeight, pdfHeight - 8));
+            pdf.save(`Invoice-${selectedOrder.id.slice(-8)}.pdf`);
+          }
+
+          pdfSuccess = true;
+          showNotification('ইনভয়েস PDF ডাউনলোড সফল হয়েছে! ✅', 'success');
+        } catch (canvasErr) {
+          console.warn('html2canvas capture skipped/failed:', canvasErr);
+        }
+
+        if (!pdfSuccess) {
+          // Fallback to browser native print/save-as-PDF
+          window.print();
+          showNotification('প্রিন্ট উইন্ডো ওপেন হয়েছে। "Save as PDF" সিলেক্ট করে সংরক্ষণ করতে পারেন।', 'success');
+        }
      } catch (error) {
         console.error('PDF Generation Error:', error);
-        showNotification('ডাউনলোড ব্যর্থ হয়েছে। স্ক্রিনশট নিন অথবা প্রিন্ট অপশন ব্যবহার করুন।', 'error');
+        showNotification('ডাউনলোড ব্যর্থ হয়েছে। দয়া করে "প্রিন্ট" অপশন ব্যবহার করুন।', 'error');
      } finally {
         setIsDownloading(false);
      }
@@ -638,26 +776,143 @@ export default function AdminPage() {
   );
 
   const renderOrders = () => {
+    const query = orderSearchQuery.trim().toLowerCase();
+    const cleanDigits = orderSearchQuery.replace(/[^0-9]/g, '');
+
     const filteredOrders = orders.filter(o => {
-      if (orderFilter === 'All') return true;
-      return o.status === orderFilter;
+      // 1. Status Filter
+      if (orderFilter !== 'All' && o.status !== orderFilter) {
+        return false;
+      }
+
+      // 2. Search Query Filter
+      if (!query) return true;
+
+      const orderId = (o.id || '').toLowerCase();
+      const lastSixId = orderId.slice(-6);
+      const customerName = (o.customerInfo?.name || '').toLowerCase();
+      const customerPhone = (o.customerInfo?.phone || '');
+      const phoneDigits = customerPhone.replace(/[^0-9]/g, '');
+      const customerAddress = (o.customerInfo?.address || '').toLowerCase();
+      const customerArea = (o.customerInfo?.area || '').toLowerCase();
+      const transactionId = (o.transactionId || '').toLowerCase();
+      const lastNumber = (o.lastNumber || '').toLowerCase();
+      const trackingCode = (o.steadfastTrackingCode || '').toLowerCase();
+      const paymentMethod = (o.paymentMethod || '').toLowerCase();
+
+      // Check match in ID, Name, Phone, Address, Transaction ID, Last Number, or Tracking
+      const matchesId = orderId.includes(query) || lastSixId.includes(query);
+      const matchesName = customerName.includes(query);
+      const matchesPhone = customerPhone.toLowerCase().includes(query) || (cleanDigits.length > 0 && phoneDigits.includes(cleanDigits));
+      const matchesAddress = customerAddress.includes(query) || customerArea.includes(query);
+      const matchesTxn = transactionId.includes(query) || lastNumber.includes(query);
+      const matchesTracking = trackingCode.includes(query);
+      const matchesPayment = paymentMethod.includes(query);
+
+      return matchesId || matchesName || matchesPhone || matchesAddress || matchesTxn || matchesTracking || matchesPayment;
     });
+
+    const statusCounts = {
+      All: orders.length,
+      Pending: orders.filter(o => o.status === 'Pending').length,
+      Completed: orders.filter(o => o.status === 'Completed').length,
+      Cancelled: orders.filter(o => o.status === 'Cancelled').length,
+    };
 
     return (
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h2 className="text-xl md:text-2xl font-black">{language === 'bn' ? "অর্ডার ম্যানেজমেন্ট" : "Orders"}</h2>
-          <div className="flex bg-white dark:bg-neutral-900 p-1 rounded-xl border border-neutral-100 dark:border-neutral-800 w-full sm:w-auto overflow-x-auto">
-             {(['All', 'Pending', 'Completed', 'Cancelled'] as const).map(f => (
-               <button 
-                 key={f}
-                 onClick={() => setOrderFilter(f)}
-                 className={`px-4 py-2 rounded-lg text-xs font-black transition-all ${orderFilter === f ? 'bg-primary text-white' : 'text-neutral-400'}`}
-               >
-                 {f}
-               </button>
-             ))}
+        {/* Header Title and Search/Filter Bar */}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2">
+                <Package className="text-primary" size={24} />
+                <span>{language === 'bn' ? "অর্ডার ম্যানেজমেন্ট" : "Orders"}</span>
+              </h2>
+              <p className="text-xs text-neutral-400 font-bold mt-0.5">
+                {language === 'bn' 
+                  ? `মোট ${orders.length} টি অর্ডারের মধ্যে ${filteredOrders.length} টি দেখানো হচ্ছে` 
+                  : `Showing ${filteredOrders.length} of ${orders.length} orders`}
+              </p>
+            </div>
+
+            {/* Status Filter Buttons */}
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <div className="flex bg-white dark:bg-neutral-900 p-1.5 rounded-2xl border border-neutral-200/80 dark:border-neutral-800 overflow-x-auto shadow-sm gap-1">
+                {(['All', 'Pending', 'Completed', 'Cancelled'] as const).map(f => (
+                  <button 
+                    key={f}
+                    onClick={() => setOrderFilter(f)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                      orderFilter === f 
+                        ? 'bg-primary text-white shadow-md shadow-primary/20 scale-[1.02]' 
+                        : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    <span>
+                      {f === 'All' ? (language === 'bn' ? 'সব' : 'All') :
+                       f === 'Pending' ? (language === 'bn' ? 'পেন্ডিং' : 'Pending') :
+                       f === 'Completed' ? (language === 'bn' ? 'কমপ্লিট' : 'Completed') :
+                       (language === 'bn' ? 'ক্যান্সেল' : 'Cancelled')}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                      orderFilter === f 
+                        ? 'bg-white/20 text-white' 
+                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
+                    }`}>
+                      {statusCounts[f]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
+
+          {/* Search Box */}
+          <div className="relative w-full">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none flex items-center">
+              <Search size={18} />
+            </div>
+            <input
+              type="text"
+              value={orderSearchQuery}
+              onChange={(e) => setOrderSearchQuery(e.target.value)}
+              placeholder={language === 'bn' 
+                ? "অর্ডার আইডি (#xxxxxx), গ্রাহকের নাম, ফোন নম্বর অথবা ট্র্যাকিং কোড দিয়ে সার্চ করুন..." 
+                : "Search by order ID (#xxxxxx), customer name, phone number or tracking code..."}
+              className="w-full pl-11 pr-24 py-3.5 bg-white dark:bg-neutral-900 border border-neutral-200/80 dark:border-neutral-800 rounded-2xl text-sm font-bold placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm"
+            />
+            {orderSearchQuery && (
+              <button
+                onClick={() => setOrderSearchQuery('')}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1 px-2.5 py-1.5 text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl text-xs font-bold transition-all"
+                title={language === 'bn' ? "সার্চ ক্লিয়ার করুন" : "Clear search"}
+              >
+                <X size={14} />
+                <span className="text-[11px]">{language === 'bn' ? "মুছুন" : "Clear"}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Active Search Notification Tag */}
+          {orderSearchQuery && (
+            <div className="flex items-center justify-between text-xs font-bold text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800/80 px-4 py-2.5 rounded-xl border border-neutral-200/60 dark:border-neutral-700/60">
+              <span className="flex items-center gap-2">
+                <Search size={14} className="text-primary" />
+                <span>
+                  {language === 'bn' 
+                    ? `"${orderSearchQuery}" দিয়ে ফিল্টার করা হয়েছে — ${filteredOrders.length} টি অর্ডার পাওয়া গেছে` 
+                    : `Filtered by "${orderSearchQuery}" — ${filteredOrders.length} order(s) found`}
+                </span>
+              </span>
+              <button 
+                onClick={() => setOrderSearchQuery('')}
+                className="text-primary hover:underline font-black text-xs cursor-pointer ml-2"
+              >
+                {language === 'bn' ? "ফিল্টার রিসেট করুন" : "Reset filter"}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 overflow-hidden">
@@ -676,12 +931,12 @@ export default function AdminPage() {
                 {filteredOrders.length > 0 ? filteredOrders.map(order => (
                   <tr key={order.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors">
                     <td className="px-8 py-6">
-                      <div className="font-black text-sm">#{order.id.slice(-6)}</div>
-                      <div className="text-[10px] text-neutral-400 font-bold">{order.date}</div>
+                      <div className="font-black text-sm">#{(order.id || '').slice(-6)}</div>
+                      <div className="text-[10px] text-neutral-400 font-bold">{order.date || ''}</div>
                     </td>
                     <td className="px-8 py-6">
-                      <div className="font-bold text-sm">{order.customerInfo.name}</div>
-                      <div className="text-[10px] text-neutral-400 font-bold">{order.customerInfo.phone}</div>
+                      <div className="font-bold text-sm">{order.customerInfo?.name || 'Customer'}</div>
+                      <div className="text-[10px] text-neutral-400 font-bold">{order.customerInfo?.phone || 'No phone'}</div>
                     </td>
                     <td className="px-8 py-6">
                       <div className="font-black text-primary">৳{order.total}</div>
@@ -708,7 +963,7 @@ export default function AdminPage() {
                             <Truck size={10} />
                             <span className="font-mono">{order.steadfastTrackingCode}</span>
                             <span className="text-[8px] uppercase px-1 bg-amber-500/20 rounded">
-                              {order.steadfastStatus ? formatSteadfastStatus(order.steadfastStatus) : 'Booked'}
+                              {order.steadfastStatus ? (formatSteadfastStatus(order.steadfastStatus, language === 'bn' ? 'bn' : 'en')?.label || order.steadfastStatus) : 'Booked'}
                             </span>
                           </div>
                         )}
@@ -760,7 +1015,34 @@ export default function AdminPage() {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={5} className="px-8 py-12 text-center text-neutral-400 font-bold">কোন অর্ডার পাওয়া যায়নি</td>
+                    <td colSpan={5} className="px-8 py-16 text-center">
+                      <div className="max-w-sm mx-auto space-y-3">
+                        <div className="w-12 h-12 rounded-2xl bg-neutral-100 dark:bg-neutral-800 text-neutral-400 flex items-center justify-center mx-auto">
+                          <Package size={24} />
+                        </div>
+                        <p className="text-sm font-bold text-neutral-600 dark:text-neutral-300">
+                          {orderSearchQuery 
+                            ? (language === 'bn' ? `"${orderSearchQuery}" দিয়ে কোনো অর্ডার পাওয়া যায়নি` : `No orders found matching "${orderSearchQuery}"`)
+                            : (language === 'bn' ? "কোন অর্ডার পাওয়া যায়নি" : "No orders found")}
+                        </p>
+                        <p className="text-xs text-neutral-400">
+                          {orderSearchQuery
+                            ? (language === 'bn' ? "বানান ঠিক আছে কিনা অথবা মোবাইল নম্বর সঠিক দিয়ে চেক করুন।" : "Please check your query or clear the filter.")
+                            : (language === 'bn' ? "নতুন অর্ডার আসলে এখানে দেখতে পাবেন।" : "New orders will appear here.")}
+                        </p>
+                        {orderSearchQuery && (
+                          <div className="pt-2">
+                            <button
+                              onClick={() => setOrderSearchQuery('')}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary/10 hover:bg-primary text-primary hover:text-white text-xs font-black rounded-xl transition-all"
+                            >
+                              <X size={14} />
+                              <span>{language === 'bn' ? "সার্চ ক্লিয়ার করুন" : "Clear search"}</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -828,72 +1110,167 @@ export default function AdminPage() {
          </div>
 
          <div className="space-y-6">
+            {/* Facebook Page Link */}
             <div className="space-y-3">
                <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
-                  <Youtube size={14} className="text-red-600" /> YouTube Channel Link
+                  <Facebook size={14} className="text-blue-600" /> {language === 'bn' ? 'ফেসবুক পেজ লিঙ্ক (Facebook Page Link)' : 'Facebook Page Link'}
+               </label>
+               <div className="relative group">
+                  <input 
+                    type="text" 
+                    value={contactInfo.facebookPageLink || ''}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setContactInfo({
+                        ...contactInfo, 
+                        facebookPageLink: val,
+                        // Maintain backward compatibility with older components using supportLink
+                        supportLink: contactInfo.supportLink ? contactInfo.supportLink : val
+                      });
+                    }}
+                    className="w-full pl-6 pr-24 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50 font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+                    placeholder="https://facebook.com/yourpagename"
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {contactInfo.facebookPageLink && (
+                      <a 
+                        href={contactInfo.facebookPageLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-neutral-400 hover:text-blue-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-xl transition-all"
+                        title="ভিজিট করুন (Open Page)"
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    )}
+                    {contactInfo.facebookPageLink && (
+                      <button 
+                        onClick={() => setContactInfo({...contactInfo, facebookPageLink: ''})}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                        title="মুছে ফেলুন (Clear)"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+               </div>
+            </div>
+
+            {/* Instagram Profile Link */}
+            <div className="space-y-3">
+               <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                  <Instagram size={14} className="text-pink-600" /> {language === 'bn' ? 'ইনস্টাগ্রাম প্রোফাইল লিঙ্ক (Instagram Link)' : 'Instagram Profile Link'}
+               </label>
+               <div className="relative group">
+                  <input 
+                    type="text" 
+                    value={contactInfo.instagramLink || contactInfo.supportLink || ''}
+                    onChange={e => setContactInfo({
+                      ...contactInfo, 
+                      instagramLink: e.target.value,
+                      supportLink: e.target.value
+                    })}
+                    className="w-full pl-6 pr-24 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50 font-bold focus:ring-2 focus:ring-pink-500 focus:outline-none transition-all"
+                    placeholder="https://instagram.com/username"
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {(contactInfo.instagramLink || contactInfo.supportLink) && (
+                      <a 
+                        href={contactInfo.instagramLink || contactInfo.supportLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-neutral-400 hover:text-pink-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-xl transition-all"
+                        title="ভিজিট করুন (Open Profile)"
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    )}
+                    {(contactInfo.instagramLink || contactInfo.supportLink) && (
+                      <button 
+                        onClick={() => setContactInfo({...contactInfo, instagramLink: '', supportLink: ''})}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                        title="মুছে ফেলুন (Clear)"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+               </div>
+            </div>
+
+            {/* YouTube Channel Link */}
+            <div className="space-y-3">
+               <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
+                  <Youtube size={14} className="text-red-600" /> {language === 'bn' ? 'ইউটিউব চ্যানেল লিঙ্ক (YouTube Channel Link)' : 'YouTube Channel Link'}
                </label>
                <div className="relative group">
                   <input 
                     type="text" 
                     value={contactInfo.youtubeLink || ''}
                     onChange={e => setContactInfo({...contactInfo, youtubeLink: e.target.value})}
-                    className="w-full pl-6 pr-12 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold"
+                    className="w-full pl-6 pr-24 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50 font-bold focus:ring-2 focus:ring-red-500 focus:outline-none transition-all"
                     placeholder="https://youtube.com/@channel"
                   />
-                  {contactInfo.youtubeLink && (
-                    <button 
-                      onClick={() => setContactInfo({...contactInfo, youtubeLink: ''})}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {contactInfo.youtubeLink && (
+                      <a 
+                        href={contactInfo.youtubeLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-neutral-400 hover:text-red-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-xl transition-all"
+                        title="ভিজিট করুন (Open Channel)"
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    )}
+                    {contactInfo.youtubeLink && (
+                      <button 
+                        onClick={() => setContactInfo({...contactInfo, youtubeLink: ''})}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                        title="মুছে ফেলুন (Clear)"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
                </div>
             </div>
 
+            {/* TikTok Profile Link */}
             <div className="space-y-3">
                <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
-                  <Instagram size={14} className="text-pink-600" /> Instagram Profile Link
-               </label>
-               <div className="relative group">
-                  <input 
-                    type="text" 
-                    value={contactInfo.supportLink || ''}
-                    onChange={e => setContactInfo({...contactInfo, supportLink: e.target.value})}
-                    className="w-full pl-6 pr-12 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold"
-                    placeholder="https://instagram.com/user"
-                  />
-                  {contactInfo.supportLink && (
-                    <button 
-                      onClick={() => setContactInfo({...contactInfo, supportLink: ''})}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-               </div>
-            </div>
-
-            <div className="space-y-3">
-               <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
-                  <Share2 size={14} className="text-neutral-900 dark:text-white" /> TikTok Profile Link
+                  <Share2 size={14} className="text-neutral-900 dark:text-white" /> {language === 'bn' ? 'টিকটক প্রোফাইল লিঙ্ক (TikTok Profile Link)' : 'TikTok Profile Link'}
                </label>
                <div className="relative group">
                   <input 
                     type="text" 
                     value={contactInfo.tiktokLink || ''}
                     onChange={e => setContactInfo({...contactInfo, tiktokLink: e.target.value})}
-                    className="w-full pl-6 pr-12 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold"
+                    className="w-full pl-6 pr-24 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200/50 dark:border-neutral-700/50 font-bold focus:ring-2 focus:ring-neutral-500 focus:outline-none transition-all"
                     placeholder="https://tiktok.com/@user"
                   />
-                  {contactInfo.tiktokLink && (
-                    <button 
-                      onClick={() => setContactInfo({...contactInfo, tiktokLink: ''})}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    {contactInfo.tiktokLink && (
+                      <a 
+                        href={contactInfo.tiktokLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-xl transition-all"
+                        title="ভিজিট করুন (Open Profile)"
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    )}
+                    {contactInfo.tiktokLink && (
+                      <button 
+                        onClick={() => setContactInfo({...contactInfo, tiktokLink: ''})}
+                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                        title="মুছে ফেলুন (Clear)"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
                </div>
             </div>
          </div>
@@ -2340,6 +2717,374 @@ export default function AdminPage() {
     );
   };
 
+  const renderWelcomePopup = () => {
+    const popup = localWelcomePopup || {
+      isEnabled: true,
+      title: "আমাদের শপে আপনাকে স্বাগতম! 🎉",
+      message: "সেরা গ্যাজেট ও ফ্যাশন আইটেমে পাচ্ছেন আকর্ষণীয় ক্যাশব্যাক ও দ্রুততম হোম ডেলিভারি সুবিধা। এখনই আপনার পছন্দের পণ্যটি অর্ডার করুন!",
+      badgeText: "স্পেশাল অফার",
+      imageUrl: "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&q=80&w=800",
+      buttonText: "অর্ডার করুন / শপ দেখুন",
+      buttonLink: "/products",
+      showOncePerSession: true
+    };
+
+    const handleSavePopup = async () => {
+      setIsSavingWelcomePopup(true);
+      try {
+        await setWelcomePopupSettings(popup);
+        showNotification(language === 'bn' ? 'ওয়েলকাম পপআপ সেটিংস সফলভাবে সংরক্ষিত হয়েছে!' : 'Welcome popup settings saved successfully!', 'success');
+      } catch (err) {
+        showNotification(language === 'bn' ? 'সেটিংস সংরক্ষণে ব্যর্থ হয়েছে' : 'Failed to save settings', 'error');
+      } finally {
+        setIsSavingWelcomePopup(false);
+      }
+    };
+
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const compressed = await compressImageFile(file, { maxWidth: 800, maxHeight: 800, quality: 0.8 });
+        setLocalWelcomePopup({ ...popup, imageUrl: compressed });
+        showNotification(language === 'bn' ? 'ছবি সফলভাবে লোড হয়েছে' : 'Image loaded successfully', 'success');
+      } catch (err) {
+        showNotification(language === 'bn' ? 'ছবি প্রসেস করতে ব্যর্থ হয়েছে' : 'Failed to process image', 'error');
+      }
+    };
+
+    const triggerPreview = () => {
+      window.dispatchEvent(new Event('open-welcome-popup-preview'));
+      showNotification(language === 'bn' ? 'লাইভ প্রিভিউ ওপেন করা হয়েছে!' : 'Live preview triggered!', 'success');
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Header Bar */}
+        <div className="bg-white dark:bg-neutral-900 p-6 sm:p-8 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <BellRing size={24} />
+            </div>
+            <div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
+                  {language === 'bn' ? 'ওয়েলকাম পপআপ মেসেজ' : 'Welcome Popup Message'}
+                </h2>
+                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                  popup.isEnabled 
+                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' 
+                    : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                }`}>
+                  {popup.isEnabled ? (language === 'bn' ? 'চালু আছে (Active)' : 'Active') : (language === 'bn' ? 'বন্ধ আছে (Off)' : 'Disabled')}
+                </span>
+              </div>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-1 max-w-xl">
+                {language === 'bn' 
+                  ? 'গ্রাহক যখন ওয়েবসাইটে প্রবেশ করবে তখন এই ওয়েলকাম মেসেজ বা বিশেষ অফারের পপআপ উইন্ডো প্রদর্শিত হবে। আপনি চাইলে এক ক্লিকে এটি অন/অফ করতে পারেন।'
+                  : 'Display a welcoming popup or special offer message when customers visit your storefront.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={triggerPreview}
+              className="px-4 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-2xl font-bold text-xs transition-colors flex items-center gap-2"
+              title="ওয়েবসাইটে পপআপটি কেমন দেখাবে তা পরীক্ষা করুন"
+            >
+              <Eye size={15} />
+              <span>{language === 'bn' ? 'লাইভ প্রিভিউ টেস্ট' : 'Test Preview'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isSavingWelcomePopup}
+              onClick={handleSavePopup}
+              className="px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-2xl font-black text-xs transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center gap-2 disabled:opacity-50 active:scale-95"
+            >
+              <Save size={15} className={isSavingWelcomePopup ? 'animate-spin' : ''} />
+              <span>{isSavingWelcomePopup ? (language === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (language === 'bn' ? 'সেভ করুন' : 'Save Changes')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Master ON/OFF Switch Card */}
+        <div className="bg-white dark:bg-neutral-900 p-6 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Sparkles size={18} className={popup.isEnabled ? 'text-primary' : 'text-neutral-400'} />
+              <h3 className="font-black text-base text-neutral-900 dark:text-white">
+                {language === 'bn' ? 'পপআপ অন / অফ স্ট্যাটাস' : 'Popup Toggle Status'}
+              </h3>
+            </div>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
+              {popup.isEnabled 
+                ? (language === 'bn' ? 'পপআপ বর্তমানে সক্রিয় রয়েছে। ইউজার সাইটে প্রবেশ করলেই এটি প্রদর্শিত হবে।' : 'Popup is enabled and will show to visitors.') 
+                : (language === 'bn' ? 'পপআপ বর্তমানে বন্ধ রয়েছে। গ্রাহকদের কোনো পপআপ দেখানো হবে না।' : 'Popup is currently disabled.')}
+            </p>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={Boolean(popup.isEnabled)}
+              onChange={(e) => setLocalWelcomePopup({ ...popup, isEnabled: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-14 h-7 bg-neutral-200 peer-focus:outline-none rounded-full peer dark:bg-neutral-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[4px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-neutral-600 peer-checked:bg-primary"></div>
+          </label>
+        </div>
+
+        {/* Content Configuration & Live Preview Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Form Settings Column */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="bg-white dark:bg-neutral-900 p-6 sm:p-7 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 space-y-5">
+              <h3 className="font-black text-sm uppercase tracking-wider text-neutral-400 flex items-center gap-2">
+                <Edit2 size={15} /> {language === 'bn' ? 'পপআপ কনটেন্ট ও ডিজাইন' : 'Popup Content & Design'}
+              </h3>
+
+              {/* Title */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {language === 'bn' ? 'পপআপ শিরোনাম (Title)' : 'Popup Title'}
+                </label>
+                <input
+                  type="text"
+                  value={popup.title || ''}
+                  onChange={(e) => setLocalWelcomePopup({ ...popup, title: e.target.value })}
+                  placeholder="যেমন: আমাদের শপে আপনাকে স্বাগতম! 🎉"
+                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
+                />
+              </div>
+
+              {/* Badge Tag */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>{language === 'bn' ? 'অফার ব্যাজ / ট্যাগ (Badge / Tag)' : 'Offer Badge / Tag'}</span>
+                  <span className="text-[10px] text-neutral-400 font-normal">ঐচ্ছিক (Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={popup.badgeText || ''}
+                  onChange={(e) => setLocalWelcomePopup({ ...popup, badgeText: e.target.value })}
+                  placeholder="যেমন: স্পেশাল অফার 🔥 বা ধামাকা ছাড়"
+                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
+                />
+              </div>
+
+              {/* Message */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                  {language === 'bn' ? 'পপআপ মেসেজ / বিবরণ (Message)' : 'Popup Message'}
+                </label>
+                <textarea
+                  rows={3}
+                  value={popup.message || ''}
+                  onChange={(e) => setLocalWelcomePopup({ ...popup, message: e.target.value })}
+                  placeholder="আপনার কাঙ্ক্ষিত স্বাগতম বার্তা বা অফারের বিবরণ এখানে লিখুন..."
+                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-medium text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all resize-none"
+                />
+              </div>
+
+              {/* Banner Image */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
+                  <span>{language === 'bn' ? 'ব্যানার ইমেজ (Banner Image)' : 'Banner Image'}</span>
+                  <span className="text-[10px] text-neutral-400 font-normal">ঐচ্ছিক (Optional)</span>
+                </label>
+                
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={popup.imageUrl || ''}
+                    onChange={(e) => setLocalWelcomePopup({ ...popup, imageUrl: e.target.value })}
+                    placeholder="https://images.unsplash.com/... বা ছবি আপলোড করুন"
+                    className="flex-1 px-5 py-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-medium text-xs text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+
+                  <label className="px-4 py-3 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer flex items-center justify-center gap-2 transition-colors shrink-0">
+                    <Camera size={15} />
+                    <span>{language === 'bn' ? 'ছবি আপলোড' : 'Upload'}</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleImageUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+
+                  {popup.imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setLocalWelcomePopup({ ...popup, imageUrl: '' })}
+                      className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-2xl transition-colors shrink-0"
+                      title="ছবি মুছে ফেলুন"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Button Text & Link */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {language === 'bn' ? 'বাটন টেক্সট (Button Text)' : 'Button Text'}
+                  </label>
+                  <input
+                    type="text"
+                    value={popup.buttonText || ''}
+                    onChange={(e) => setLocalWelcomePopup({ ...popup, buttonText: e.target.value })}
+                    placeholder="অর্ডার করুন / শপ দেখুন"
+                    className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    {language === 'bn' ? 'বাটন লিংক (Button Link)' : 'Button Link / Route'}
+                  </label>
+                  <input
+                    type="text"
+                    value={popup.buttonLink || ''}
+                    onChange={(e) => setLocalWelcomePopup({ ...popup, buttonLink: e.target.value })}
+                    placeholder="/products"
+                    className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Link Presets */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold text-neutral-400">{language === 'bn' ? 'কুইক লিংক:' : 'Quick Presets:'}</span>
+                {[
+                  { label: 'সব পণ্য (/products)', link: '/products' },
+                  { label: 'ক্যাটাগরি (/categories)', link: '/categories' },
+                  { label: 'কার্ট (/cart)', link: '/cart' },
+                  { label: 'অর্ডার ট্র্যাকিং (/order-tracking)', link: '/order-tracking' }
+                ].map(p => (
+                  <button
+                    key={p.link}
+                    type="button"
+                    onClick={() => setLocalWelcomePopup({ ...popup, buttonLink: p.link })}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
+                      popup.buttonLink === p.link 
+                        ? 'bg-primary text-white' 
+                        : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Session Frequency Toggle */}
+              <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                    {language === 'bn' ? 'একই সেশনে একবার দেখাবে (Show Once Per Session)' : 'Show Once Per Session'}
+                  </h4>
+                  <p className="text-[11px] text-neutral-400 font-normal">
+                    {language === 'bn' 
+                      ? 'অন থাকলে গ্রাহক ব্রাউজার বন্ধ না করা পর্যন্ত প্রতিবার পেজ রিলোডে বারবার বিরক্ত হবে না।'
+                      : 'Prevents showing repeatedly during the same visitor browsing session.'}
+                  </p>
+                </div>
+                <input 
+                  type="checkbox" 
+                  checked={popup.showOncePerSession ?? true}
+                  onChange={(e) => setLocalWelcomePopup({ ...popup, showOncePerSession: e.target.checked })}
+                  className="w-5 h-5 rounded-lg text-primary focus:ring-primary/20 accent-primary cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Real-Time Live Preview Column */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="sticky top-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-sm uppercase tracking-wider text-neutral-400 flex items-center gap-2">
+                  <Eye size={15} /> {language === 'bn' ? 'লাইভ প্রিভিউ (Real-Time Preview)' : 'Live Preview'}
+                </h3>
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
+                  লাইভ ভিজ্যুয়াল
+                </span>
+              </div>
+
+              {/* Mock Window Frame */}
+              <div className="bg-neutral-900 p-4 sm:p-5 rounded-[2.5rem] shadow-xl border border-neutral-800">
+                <div className="flex items-center gap-1.5 mb-3 px-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
+                  <span className="text-[10px] text-neutral-500 font-mono ml-2">storefront/welcome-modal</span>
+                </div>
+
+                {/* Popup Card Preview */}
+                <div className="bg-white dark:bg-neutral-900 rounded-3xl overflow-hidden border border-neutral-100 dark:border-neutral-800 shadow-2xl relative">
+                  {/* Mock Close Button */}
+                  <div className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center">
+                    <X size={14} />
+                  </div>
+
+                  {/* Banner Image Preview */}
+                  {popup.imageUrl ? (
+                    <div className="relative w-full h-36 bg-neutral-100 dark:bg-neutral-800 overflow-hidden">
+                      <img 
+                        src={popup.imageUrl} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                      {popup.badgeText && (
+                        <div className="absolute bottom-2.5 left-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-black shadow-md">
+                          <Sparkles size={10} />
+                          <span>{popup.badgeText}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : popup.badgeText ? (
+                    <div className="pt-4 text-center">
+                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-black">
+                        <Gift size={12} /> {popup.badgeText}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {/* Body Preview */}
+                  <div className="p-5 text-center space-y-3">
+                    <h4 className="font-black text-lg text-neutral-900 dark:text-white leading-snug">
+                      {popup.title || 'আমাদের শপে আপনাকে স্বাগতম!'}
+                    </h4>
+                    <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+                      {popup.message || 'সেরা গ্যাজেট ও ফ্যাশন আইটেম সেরা মূল্যে পেতে আজই অর্ডার করুন।'}
+                    </p>
+
+                    <div className="pt-2 flex gap-2">
+                      <div className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-primary/25">
+                        <ShoppingBag size={14} />
+                        <span>{popup.buttonText || 'অর্ডার করুন'}</span>
+                      </div>
+                      <div className="py-2.5 px-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-500 font-bold text-[11px] flex items-center justify-center">
+                        পরে দেখবো
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const tabs = [
     { id: 'dashboard', label: 'ড্যাশবোর্ড', icon: <LayoutDashboard size={18} /> },
     { id: 'products', label: 'প্রডাক্টস', icon: <ShoppingBag size={18} /> },
@@ -2349,6 +3094,7 @@ export default function AdminPage() {
     { id: 'sliders', label: 'স্লাইডার', icon: <ImageIcon size={18} /> },
     { id: 'orders', label: 'অর্ডার্স', icon: <Package size={18} /> },
     { id: 'offers', label: 'অফার', icon: <Gift size={18} /> },
+    { id: 'popup', label: 'ওয়েলকাম পপআপ', icon: <BellRing size={18} /> },
     { id: 'messages', label: 'নোটিশ', icon: <MessageSquare size={18} /> },
     { id: 'telegram', label: 'টেলিগ্রাম', icon: <Send size={18} /> },
     { id: 'steadfast', label: 'স্টেডফাস্ট কুরিয়ার', icon: <Truck size={18} /> },
@@ -2457,6 +3203,7 @@ export default function AdminPage() {
               {activeTab === 'sliders' && renderSliders()}
               {activeTab === 'orders' && renderOrders()}
               {activeTab === 'offers' && renderOffers()}
+              {activeTab === 'popup' && renderWelcomePopup()}
               {activeTab === 'social-links' && renderSocialLinks()}
               {activeTab === 'messages' && renderMessages()}
               {activeTab === 'telegram' && renderTelegram()}
@@ -2473,10 +3220,9 @@ export default function AdminPage() {
               key="invoice-modal"
               className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
                 <motion.div 
-                  ref={invoiceRef}
                   initial={{opacity: 0, y: 20}} 
                   animate={{opacity: 1, y: 0}} 
-                  className="bg-white dark:bg-neutral-900 w-full max-w-2xl max-h-[90vh] rounded-[2rem] overflow-hidden flex flex-col shadow-2xl print:max-w-none print:bg-white print:shadow-none print:rounded-none print:h-auto print:max-h-none print-invoice font-sans"
+                  className="bg-white dark:bg-neutral-900 w-full max-w-2xl max-h-[90vh] rounded-[2rem] overflow-hidden flex flex-col shadow-2xl print:hidden font-sans"
                 >
                   {/* Top Toolbar - Hidden in Print */}
                   <div className="p-4 border-b border-neutral-100 dark:border-neutral-800 flex justify-between items-center bg-neutral-50/50 dark:bg-neutral-900/50 no-print">
@@ -2488,14 +3234,42 @@ export default function AdminPage() {
                           {language === 'bn' ? 'অর্ডার ডিটেইলস' : 'Order Details'}
                         </h3>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {/* 1 Copy vs 2 Copies per A4 Switch */}
+                        <div className="flex bg-neutral-100 dark:bg-neutral-800 p-0.5 rounded-lg text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setInvoiceCopyMode('dual')}
+                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'dual' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                            title="A4 পেজে ২টি ইনভয়েস (কাটার দাগ সহ)"
+                          >
+                            A4 (২টি ইনভয়েস)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInvoiceCopyMode('single')}
+                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'single' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                            title="১টি সিঙ্গেল ইনভয়েস স্লিপ"
+                          >
+                            ১টি ইনভয়েস
+                          </button>
+                        </div>
+
+                        <button 
+                          onClick={() => window.print()}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-lg transition-all font-bold text-xs"
+                          title={language === 'bn' ? 'ব্রাউজার থেকে প্রিন্ট করুন বা PDF হিসেবে সেভ করুন' : 'Print Invoice'}
+                        >
+                           <Printer size={14} />
+                           <span>{language === 'bn' ? 'প্রিন্ট' : 'Print'}</span>
+                        </button>
                         <button 
                           onClick={downloadInvoice}
                           disabled={isDownloading}
-                          className={`flex items-center gap-2 px-4 py-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all font-bold text-xs ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={`flex items-center gap-2 px-3.5 py-1.5 bg-primary text-white rounded-lg hover:bg-primary/90 transition-all font-bold text-xs shadow-sm ${isDownloading ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                            {isDownloading ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Download size={14} />}
-                           <span>{isDownloading ? (language === 'bn' ? 'ডাউনলোড হচ্ছে...' : 'Downloading...') : (language === 'bn' ? 'ইনভয়েস ডাউনলোড' : 'Save PDF')}</span>
+                           <span>{isDownloading ? (language === 'bn' ? 'ডাউনলোড হচ্ছে...' : 'Downloading...') : (language === 'bn' ? 'ইনভয়েস PDF' : 'Save PDF')}</span>
                         </button>
                         <button onClick={() => { setSelectedOrder(null); setShowInvoicePreview(false); }} className="p-1.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg hover:bg-red-50 text-red-500 transition-all">
                            <X size={16} />
@@ -2602,8 +3376,14 @@ export default function AdminPage() {
                               </span>
                             </div>
                             {selectedOrder.steadfastTrackingCode && (
-                              <span className="px-2.5 py-1 bg-amber-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider">
-                                {selectedOrder.steadfastStatus ? formatSteadfastStatus(selectedOrder.steadfastStatus) : 'Booked'}
+                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                                selectedOrder.steadfastStatus 
+                                  ? (formatSteadfastStatus(selectedOrder.steadfastStatus, language === 'bn' ? 'bn' : 'en')?.colorClass || 'bg-amber-500 text-white')
+                                  : 'bg-amber-500 text-white'
+                              }`}>
+                                {selectedOrder.steadfastStatus 
+                                  ? (formatSteadfastStatus(selectedOrder.steadfastStatus, language === 'bn' ? 'bn' : 'en')?.label || selectedOrder.steadfastStatus) 
+                                  : 'Booked'}
                               </span>
                             )}
                           </div>
@@ -2702,142 +3482,218 @@ export default function AdminPage() {
                         </div>
 
                         <div className="pt-6 border-t border-neutral-200 dark:border-neutral-800 space-y-4">
-                          <button 
-                            onClick={() => downloadInvoice()}
-                            disabled={isDownloading}
-                            className="w-full py-4 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-primary/90 disabled:opacity-50 transition-all shadow-lg"
-                          >
-                            <Download size={18} /> 
-                            {isDownloading ? (language === 'bn' ? 'ডাউনলোড হচ্ছে...' : 'Downloading...') : (language === 'bn' ? 'ডাউনলোড ইনভয়েস' : 'Download Invoice')}
-                          </button>
+                          <div className="flex items-center justify-between gap-3 bg-neutral-100 dark:bg-neutral-800 p-2 rounded-2xl">
+                            <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300 pl-2">
+                              {invoiceCopyMode === 'dual' ? 'A4 পেজে ২টি ইনভয়েস মোড সক্রিয়' : '১টি ইনভয়েস মোড সক্রিয়'}
+                            </span>
+                            <div className="flex bg-white dark:bg-neutral-700 p-0.5 rounded-xl text-[10px] font-bold">
+                              <button
+                                type="button"
+                                onClick={() => setInvoiceCopyMode('dual')}
+                                className={`px-3 py-1 rounded-lg transition-all ${invoiceCopyMode === 'dual' ? 'bg-primary text-white shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                              >
+                                ২টি ইনভয়েস (A4)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setInvoiceCopyMode('single')}
+                                className={`px-3 py-1 rounded-lg transition-all ${invoiceCopyMode === 'single' ? 'bg-primary text-white shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                              >
+                                ১টি ইনভয়েস
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <button 
+                              onClick={() => downloadInvoice()}
+                              disabled={isDownloading}
+                              className="py-3.5 bg-primary text-white rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-primary/90 disabled:opacity-50 transition-all shadow-md text-xs sm:text-sm"
+                            >
+                              <Download size={16} /> 
+                              {isDownloading ? 'ডাউনলোড হচ্ছে...' : 'PDF ডাউনলোড'}
+                            </button>
+                            <button 
+                              onClick={() => window.print()}
+                              className="py-3.5 bg-neutral-800 hover:bg-neutral-900 text-white rounded-2xl font-black flex items-center justify-center gap-2 transition-all shadow-md text-xs sm:text-sm"
+                            >
+                              <Printer size={16} /> 
+                              প্রিন্ট করুন
+                            </button>
+                          </div>
+
                           <div className="text-center">
                             <button 
                               onClick={() => setShowInvoicePreview(!showInvoicePreview)}
-                              className="inline-flex items-center gap-2 px-6 py-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 rounded-xl font-bold text-[10px] uppercase tracking-widest"
+                              className="inline-flex items-center gap-2 px-6 py-2 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-neutral-200 transition-all"
                             >
-                              <Printer size={14} /> 
-                              {showInvoicePreview ? (language === 'bn' ? 'প্রিভিউ লুকান' : 'Hide Preview') : (language === 'bn' ? 'প্রিভিউ ইনভয়েস' : 'Preview Invoice')}
+                              <FileText size={14} /> 
+                              {showInvoicePreview ? (language === 'bn' ? 'প্রিভিউ লুকান' : 'Hide Preview') : (language === 'bn' ? 'প্রিভিউ দেখুন' : 'Preview Invoice')}
                             </button>
                           </div>
                         </div>
                      </div>
 
-                     {/* The Invoice Preview - Hidden by default in UI, always visible for print/download */}
-                     {(showInvoicePreview || isDownloading) && (
-                        <div className="bg-white text-neutral-900 border-t border-neutral-100 print:border-none">
-                           <div className="p-10 print:p-0 flex flex-col items-center" ref={invoiceRef}>
-                                 <div className="max-w-xl mx-auto space-y-6 bg-white border border-neutral-100 p-8 print:border-neutral-100 print:p-6 print:h-[148mm] print:overflow-hidden">
-                                    {/* Header */}
-                                    <div className="flex justify-between items-start border-b border-neutral-100 pb-4">
-                                       <div className="space-y-0.5 text-left">
-                                          <h2 className="text-lg font-black tracking-tight text-primary">{contactInfo.name || 'Gadget Galaxy BD'}</h2>
-                                          <p className="text-[9px] text-neutral-500 font-medium italic">সততা ও বিশ্বাস এ আমরা অবিচল</p>
-                                          <div className="pt-2 space-y-0.5 text-[9px] text-neutral-500 font-medium">
-                                            <p className="flex items-center gap-1.5"><MapPin size={8} /> {contactInfo.address}</p>
-                                            <p className="flex items-center gap-1.5"><Phone size={8} /> {contactInfo.phone}</p>
-                                          </div>
-                                       </div>
-                                       <div className="text-right space-y-1">
-                                          <div className="inline-block px-2 py-0.5 bg-neutral-100 rounded-full text-[8px] font-bold uppercase tracking-widest text-neutral-600">
-                                            Invoice
-                                          </div>
-                                          <p className="text-sm font-black tracking-tighter text-neutral-900">#{selectedOrder.id.slice(-8).toUpperCase()}</p>
-                                          <p className="text-[9px] font-bold text-neutral-400 uppercase">
-                                            {(() => {
-                                              try {
-                                                const date = selectedOrder.createdAt?.toDate ? selectedOrder.createdAt.toDate() : new Date(selectedOrder.createdAt);
-                                                return isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-                                              } catch (e) {
-                                                return 'N/A';
-                                              }
-                                            })()}
-                                          </p>
-                                       </div>
-                                    </div>
+                     {/* The Invoice Document - Mounted for instant download & printing with Bengali Font & 2-per-A4 support */}
+                     {(() => {
+                        const formattedDate = (() => {
+                          try {
+                            const date = selectedOrder.createdAt?.toDate ? selectedOrder.createdAt.toDate() : new Date(selectedOrder.createdAt);
+                            return isNaN(date.getTime()) ? 'N/A' : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                          } catch (e) {
+                            return 'N/A';
+                          }
+                        })();
 
-                                    {/* Customer & Order Info */}
-                                    <div className="grid grid-cols-2 gap-6">
-                                       <div className="space-y-1.5 text-left">
-                                          <p className="text-[8px] font-bold uppercase tracking-widest text-neutral-400">Bill To</p>
-                                          <div className="space-y-0.5">
-                                            <p className="text-xs font-bold text-neutral-900">{selectedOrder.customerInfo.name}</p>
-                                            <p className="text-[10px] font-medium text-neutral-600">{selectedOrder.customerInfo.phone}</p>
-                                            <p className="text-[10px] text-neutral-500 leading-relaxed italic">
-                                              {selectedOrder.customerInfo.address}, {selectedOrder.customerInfo.area}
-                                            </p>
-                                          </div>
-                                       </div>
-                                       <div className="space-y-1.5 text-right">
-                                          <p className="text-[8px] font-bold uppercase tracking-widest text-neutral-400">Payment</p>
-                                          <div className="space-y-0.5">
-                                            <p className="text-[10px] font-bold uppercase text-neutral-700">
-                                              {selectedOrder.paymentMethod === 'Cash on Delivery' ? (language === 'bn' ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery') : (language === 'bn' ? 'অনলাইন পেমেন্ট' : 'Online Payment')}
-                                            </p>
-                                            <div className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-tighter ${
-                                              selectedOrder.paymentStatus === 'Approved' ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-600'
-                                            }`}>
-                                              {selectedOrder.paymentStatus || 'PENDING'}
-                                            </div>
-                                          </div>
-                                       </div>
-                                    </div>
+                        const subtotal = selectedOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+                        const deliveryFee = selectedOrder.deliveryFee || 0;
+                        const codFee = selectedOrder.serviceCharge || 0;
+                        const grandTotal = subtotal + deliveryFee + codFee;
 
-                                    {/* Order Items Table */}
-                                    <div className="space-y-2">
-                                       <table className="w-full text-left border-collapse">
-                                          <thead>
-                                             <tr className="border-b border-neutral-100 text-[8px] font-bold uppercase tracking-widest text-neutral-400">
-                                                <th className="pb-2">Description</th>
-                                                <th className="pb-2 text-center">Qty</th>
-                                                <th className="pb-2 text-right">Total</th>
-                                             </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-neutral-50">
-                                             {selectedOrder.items.map((item, idx) => (
-                                                <tr key={idx} className="text-[11px] font-medium">
-                                                   <td className="py-2 text-neutral-800">{item.name}</td>
-                                                   <td className="py-2 text-center text-neutral-500">{item.quantity}</td>
-                                                   <td className="py-2 text-right font-bold text-neutral-900">৳{item.price * item.quantity}</td>
-                                                </tr>
-                                             ))}
-                                          </tbody>
-                                       </table>
-                                    </div>
+                        const renderInvoiceSlip = (key: string | number) => {
+                          return (
+                            <div 
+                              key={key} 
+                              className="invoice-slip bg-white text-neutral-900 border border-neutral-200 rounded-xl p-3 space-y-2 font-sans text-left"
+                              style={{ fontFamily: "'Hind Siliguri', sans-serif" }}
+                            >
+                              {/* Header */}
+                              <div className="flex justify-between items-start border-b border-neutral-200 pb-1.5">
+                                <div className="space-y-0.5 text-left">
+                                  <h2 className="text-base font-black tracking-tight text-primary leading-tight">
+                                    {contactInfo.name || 'Vai Vai Zone'}
+                                  </h2>
+                                  <p className="text-[9px] text-neutral-500 font-medium italic">সততা ও বিশ্বাস এ আমরা অবিচল</p>
+                                  <div className="flex items-center gap-3 text-[9px] text-neutral-600 font-medium pt-0.5">
+                                    <span>📍 {contactInfo.address || 'Dhaka, Bangladesh'}</span>
+                                    <span>📞 {contactInfo.phone || '01301879230'}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right space-y-0.5">
+                                  <div className="inline-block px-2 py-0.5 bg-neutral-100 rounded text-[8.5px] font-black uppercase tracking-wider text-neutral-800">
+                                    INVOICE
+                                  </div>
+                                  <p className="text-xs font-black text-neutral-900 tracking-tight leading-none">
+                                    #{selectedOrder.id.slice(-8).toUpperCase()}
+                                  </p>
+                                  <p className="text-[9px] font-bold text-neutral-500">{formattedDate}</p>
 
-                                    {/* Totals Section */}
-                                    <div className="flex justify-end border-t border-neutral-100 pt-4">
-                                       <div className="w-48 space-y-1 px-1">
-                                          <div className="flex justify-between items-center text-[9px] font-bold text-neutral-500 uppercase px-1">
-                                             <span>Subtotal</span>
-                                             <span>৳{selectedOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0)}</span>
-                                          </div>
-                                          {selectedOrder.deliveryFee > 0 && (
-                                            <div className="flex justify-between items-center text-[9px] font-bold text-neutral-500 uppercase px-1">
-                                               <span>Delivery Fee</span>
-                                               <span>৳{selectedOrder.deliveryFee}</span>
-                                            </div>
-                                          )}
-                                          {selectedOrder.serviceCharge > 0 && (
-                                            <div className="flex justify-between items-center text-[9px] font-bold text-neutral-500 uppercase px-1">
-                                               <span>COD Fee</span>
-                                               <span>৳{selectedOrder.serviceCharge}</span>
-                                            </div>
-                                          )}
-                                          <div className="flex justify-between items-center bg-neutral-100 p-2 rounded-lg mt-2">
-                                             <span className="text-[10px] font-bold text-neutral-900 uppercase">Grand Total</span>
-                                             <span className="text-sm font-black text-primary tracking-tighter">৳{selectedOrder.items.reduce((acc, item) => acc + (item.price * item.quantity), 0) + (selectedOrder.deliveryFee || 0) + (selectedOrder.serviceCharge || 0)}</span>
-                                          </div>
-                                       </div>
+                                  {/* Steadfast Parcel ID */}
+                                  {(selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode) && (
+                                    <div className="mt-1 inline-flex flex-col items-end bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-right">
+                                      <span className="text-[7.5px] font-bold text-amber-800 uppercase tracking-tight">
+                                        📦 স্টেডফাস্ট পার্সেল আইডি
+                                      </span>
+                                      <span className="font-mono text-[9.5px] font-black text-neutral-900 leading-tight">
+                                        #{selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode}
+                                      </span>
+                                      {selectedOrder.steadfastConsignmentId && selectedOrder.steadfastTrackingCode && (
+                                        <span className="font-mono text-[7.5px] text-amber-700">
+                                          TRK: {selectedOrder.steadfastTrackingCode}
+                                        </span>
+                                      )}
                                     </div>
+                                  )}
+                                </div>
+                              </div>
 
-                                    {/* Shop Policy/Thank you */}
-                                    <div className="pt-2 text-center">
-                                       <p className="text-[8px] text-neutral-400 font-bold uppercase tracking-widest italic">Thank you for your order!</p>
-                                    </div>
-                                 </div>
-                           </div>
-                        </div>
-                     )}
+                              {/* Customer & Order / Payment Info */}
+                              <div className="grid grid-cols-2 gap-3 text-left">
+                                <div className="space-y-0.5">
+                                  <p className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">Bill To (ক্রেতার তথ্য)</p>
+                                  <p className="text-xs font-bold text-neutral-900 leading-tight">{selectedOrder.customerInfo?.name || 'Customer'}</p>
+                                  <p className="text-[10px] font-semibold text-neutral-700">📞 {selectedOrder.customerInfo?.phone || 'N/A'}</p>
+                                  <p className="text-[9px] text-neutral-600 leading-snug">
+                                    🏠 {selectedOrder.customerInfo?.address || ''}{selectedOrder.customerInfo?.area ? `, ${selectedOrder.customerInfo.area}` : ''}
+                                  </p>
+                                </div>
+                                <div className="space-y-0.5 text-right">
+                                  <p className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">Payment & Order</p>
+                                  <p className="text-[10px] font-bold text-neutral-800">
+                                    {selectedOrder.paymentMethod === 'Cash on Delivery' ? 'ক্যাশ অন ডেলিভারি (COD)' : selectedOrder.paymentMethod}
+                                  </p>
+                                  <div className="flex justify-end gap-1.5 items-center pt-0.5">
+                                    <span className={`inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
+                                      selectedOrder.paymentStatus === 'Approved' ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-700'
+                                    }`}>
+                                      {selectedOrder.paymentStatus || 'PENDING'}
+                                    </span>
+                                    <span className="inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-blue-50 text-blue-700">
+                                      {selectedOrder.status}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Items Table */}
+                              <div>
+                                <table className="w-full text-left border-collapse">
+                                  <thead>
+                                    <tr className="border-b border-neutral-200 text-[8px] font-bold uppercase tracking-wider text-neutral-400">
+                                      <th className="py-1">বিবরণ (Item)</th>
+                                      <th className="py-1 text-center">পরিমাণ (Qty)</th>
+                                      <th className="py-1 text-right">দর (Price)</th>
+                                      <th className="py-1 text-right">মোট (Total)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-neutral-100">
+                                    {selectedOrder.items.map((item, idx) => (
+                                      <tr key={idx} className="text-[10px] font-medium text-neutral-800">
+                                        <td className="py-1">{item.name}</td>
+                                        <td className="py-1 text-center text-neutral-600">{item.quantity}</td>
+                                        <td className="py-1 text-right text-neutral-600">৳{item.price}</td>
+                                        <td className="py-1 text-right font-bold text-neutral-900">৳{item.price * item.quantity}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              {/* Totals & Footer */}
+                              <div className="flex justify-between items-center border-t border-neutral-100 pt-1.5">
+                                <p className="text-[8px] text-neutral-400 font-medium italic">
+                                  আমাদের সাথে কেনাকাটা করার জন্য ধন্যবাদ! {contactInfo.phone && `হটলাইন: ${contactInfo.phone}`}
+                                </p>
+                                <div className="flex items-center gap-3 text-right">
+                                  <div className="text-[9px] text-neutral-500 font-medium space-x-2">
+                                    <span>সাবটোটাল: ৳{subtotal}</span>
+                                    {deliveryFee > 0 && <span>+ ডেলিভারি: ৳{deliveryFee}</span>}
+                                    {codFee > 0 && <span>+ চার্জ: ৳{codFee}</span>}
+                                  </div>
+                                  <div className="bg-neutral-100 px-2.5 py-0.5 rounded-lg">
+                                    <span className="text-[9px] font-bold text-neutral-600 mr-1">সর্বমোট:</span>
+                                    <span className="text-xs font-black text-primary">৳{grandTotal}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        };
+
+                        return (
+                          <div className={showInvoicePreview ? "bg-white text-neutral-900 border-t border-neutral-100 p-4 md:p-6 print:border-none print:p-0" : "fixed left-0 top-0 -z-50 pointer-events-none opacity-100 print:static print:pointer-events-auto"}>
+                            <div 
+                              id="invoice-print-container"
+                              ref={invoiceRef} 
+                              className="print-invoice-capture bg-white text-neutral-900 mx-auto w-full max-w-2xl space-y-1.5"
+                              style={{ fontFamily: "'Hind Siliguri', sans-serif", width: '720px', backgroundColor: '#ffffff', color: '#111827' }}
+                            >
+                              {renderInvoiceSlip('slip-1')}
+
+                              {invoiceCopyMode === 'dual' && (
+                                <>
+                                  <div className="flex items-center justify-center gap-2 my-1 text-[8.5px] font-bold text-neutral-400 border-t border-dashed border-neutral-300 pt-1 select-none">
+                                    <span>✂</span>
+                                    <span className="tracking-wider uppercase">কাটার দাগ (Cut Here)</span>
+                                    <span>✂</span>
+                                  </div>
+                                  {renderInvoiceSlip('slip-2')}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                   </div>
                 </motion.div>
              </div>
@@ -2895,46 +3751,53 @@ export default function AdminPage() {
         <style>
           {`
             @media print {
-              /* Hide everything by default */
+              @page {
+                size: A4 portrait;
+                margin: 5mm 6mm;
+              }
+              /* Hide everything on the page by default */
               body * {
                 visibility: hidden !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
               }
-              /* Show ONLY the invoice container and its contents */
-              .print-invoice, .print-invoice * {
+              /* Show the invoice capture container and all its children */
+              .print-invoice-capture, .print-invoice-capture * {
                 visibility: visible !important;
-                display: block !important;
-                color: black !important;
               }
-              .print-invoice {
+              .print-invoice-capture {
                 position: fixed !important;
                 left: 0 !important;
                 top: 0 !important;
                 width: 100% !important;
+                max-width: 100% !important;
                 height: auto !important;
                 background: white !important;
+                color: #111827 !important;
                 box-shadow: none !important;
                 border: none !important;
                 margin: 0 !important;
-                padding: 15mm !important;
+                padding: 2mm !important;
                 z-index: 999999 !important;
                 overflow: visible !important;
                 border-radius: 0 !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                font-family: 'Hind Siliguri', sans-serif !important;
               }
-              /* Hide interactive elements inside invoice during print */
+              .invoice-slip {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                border: 1px solid #d1d5db !important;
+                max-height: 135mm !important;
+                overflow: hidden !important;
+                margin-bottom: 2mm !important;
+              }
+              /* Hide elements marked as no-print */
               .no-print, .no-print * {
                 display: none !important;
                 visibility: hidden !important;
               }
-              /* Fix for grid/flex layouts if they disappear */
-              .print-invoice .flex { display: flex !important; }
-              .print-invoice .grid { display: grid !important; }
-              .print-invoice .justify-between { justify-content: space-between !important; }
-              .print-invoice .items-center { align-items: center !important; }
-              .print-invoice .gap-8 { gap: 2rem !important; }
-              /* Force backgrounds for UI elements if needed */
-              .bg-neutral-50 { background-color: #f9fafb !important; }
             }
           `}
         </style>

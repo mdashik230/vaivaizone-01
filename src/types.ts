@@ -15,13 +15,15 @@ export interface Product {
   gallery?: string[];
   colors?: string[];
   sizes?: string[];
+  weights?: string[];
   stock?: number;
 }
 
 export interface Subcategory {
   id: string;
   name: string;
-  image: string;
+  image?: string;
+  count?: number;
   status?: 'active' | 'hidden' | 'pending' | 'upcoming';
 }
 
@@ -117,4 +119,15 @@ export interface UddoktaPayVerifyResponse {
   date?: string;
   metadata?: Record<string, any>;
   message?: string;
+}
+
+export interface WelcomePopupSettings {
+  isEnabled: boolean;
+  title: string;
+  message: string;
+  badgeText?: string;
+  imageUrl?: string;
+  buttonText: string;
+  buttonLink: string;
+  showOncePerSession?: boolean;
 }

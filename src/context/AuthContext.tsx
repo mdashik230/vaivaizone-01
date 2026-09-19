@@ -3,13 +3,15 @@ import { User, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup 
 import { doc, setDoc, serverTimestamp, getDoc, onSnapshot as onDocSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
-interface UserProfile {
+export interface UserProfile {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
   role: 'admin' | 'user';
   isVerified?: boolean;
+  phone?: string;
+  dob?: string;
 }
 
 interface AuthContextType {
@@ -33,41 +35,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vvz_is_admin') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     let profileUnsubscribe: (() => void) | null = null;
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       
       if (currentUser && currentUser.email) {
-        setIsAdmin(ADMIN_EMAILS.includes(currentUser.email.toLowerCase()));
+        const userEmail = currentUser.email.toLowerCase().trim();
+        const adminFound = ADMIN_EMAILS.some(e => e.toLowerCase().trim() === userEmail);
+        setIsAdmin(adminFound);
+        try {
+          localStorage.setItem('vvz_is_admin', adminFound ? 'true' : 'false');
+        } catch {}
         
         // Listen to user profile in Firestore
+        if (profileUnsubscribe) {
+          profileUnsubscribe();
+          profileUnsubscribe = null;
+        }
         profileUnsubscribe = onDocSnapshot(doc(db, 'users', currentUser.uid), (docSnap) => {
           if (docSnap.exists()) {
             setUserProfile(docSnap.data() as UserProfile);
           }
+        }, (error) => {
+          console.warn("User profile snapshot observer:", error);
         });
 
-        // Sync basic info to Firestore
-        try {
-          await setDoc(doc(db, 'users', currentUser.uid), {
-            uid: currentUser.uid,
-            email: currentUser.email,
-            displayName: currentUser.displayName,
-            photoURL: currentUser.photoURL,
-            lastLogin: serverTimestamp(),
-            role: ADMIN_EMAILS.includes(currentUser.email.toLowerCase()) ? 'admin' : 'user'
-          }, { merge: true });
-        } catch (error) {
-          console.error("Error syncing user:", error);
-        }
+        // Non-blocking background sync to Firestore
+        setDoc(doc(db, 'users', currentUser.uid), {
+          uid: currentUser.uid,
+          email: currentUser.email,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+          lastLogin: serverTimestamp(),
+          role: adminFound ? 'admin' : 'user'
+        }, { merge: true }).catch((error) => {
+          console.warn("Background user sync skipped/failed:", error);
+        });
       } else {
         setIsAdmin(false);
+        try {
+          localStorage.removeItem('vvz_is_admin');
+        } catch {}
         setUserProfile(null);
-        if (profileUnsubscribe) profileUnsubscribe();
+        if (profileUnsubscribe) {
+          profileUnsubscribe();
+          profileUnsubscribe = null;
+        }
       }
       
       setLoading(false);
@@ -114,6 +137,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      setIsAdmin(false);
+      try {
+        localStorage.removeItem('vvz_is_admin');
+      } catch {}
       await signOut(auth);
     } catch (error) {
       console.error("Logout Error:", error);

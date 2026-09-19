@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import Header from "../components/Header";
-import Footer from "../components/Footer";
 import PageTransition from "../components/PageTransition";
 import { useAdmin } from "../context/AdminContext";
 import { useCart } from "../context/CartContext";
@@ -147,8 +146,6 @@ export default function AllProductsPage() {
             </div>
           )}
         </main>
-
-        <Footer />
       </div>
     </PageTransition>
   );

@@ -1,9 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { ALL_PRODUCTS, CATEGORY_DATA } from '../data';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings } from '../types';
 import { sanitizeImageBase64 } from '../utils/imageCompressor';
 
 export interface TelegramSettings {
@@ -12,7 +12,18 @@ export interface TelegramSettings {
   isEnabled: boolean;
 }
 
-export type { SteadfastSettings, UddoktaPaySettings };
+export type { SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings };
+
+export const DEFAULT_WELCOME_POPUP: WelcomePopupSettings = {
+  isEnabled: true,
+  title: "আমাদের শপে আপনাকে স্বাগতম! 🎉",
+  message: "সেরা গ্যাজেট ও ফ্যাশন আইটেমে পাচ্ছেন আকর্ষণীয় ক্যাশব্যাক ও দ্রুততম হোম ডেলিভারি সুবিধা। এখনই আপনার পছন্দের পণ্যটি অর্ডার করুন!",
+  badgeText: "স্পেশাল অফার",
+  imageUrl: "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&q=80&w=800",
+  buttonText: "অর্ডার করুন / শপ দেখুন",
+  buttonLink: "/products",
+  showOncePerSession: true
+};
 
 export interface ContactInfo {
   phone: string;
@@ -20,6 +31,8 @@ export interface ContactInfo {
   supportLink: string;
   whatsappNumber: string;
   telegramLink: string;
+  facebookPageLink?: string;
+  instagramLink?: string;
   youtubeLink?: string;
   tiktokLink?: string;
   paymentBkash: string;
@@ -55,12 +68,14 @@ interface AdminContextType {
   shippingSettings: ShippingSettings;
   scrollingMessage: string;
   contactInfo: ContactInfo;
+  welcomePopupSettings: WelcomePopupSettings;
   setScrollingMessage: (msg: string) => void;
   setContactInfo: (info: ContactInfo) => void;
   setShippingSettings: (settings: ShippingSettings) => void;
   setTelegramSettings: (settings: TelegramSettings) => void;
   setSteadfastSettings: (settings: SteadfastSettings) => Promise<void>;
   setUddoktaPaySettings: (settings: UddoktaPaySettings) => Promise<void>;
+  setWelcomePopupSettings: (settings: WelcomePopupSettings) => Promise<void>;
   addSlider: (slider: Slider) => void;
   removeSlider: (id: string) => void;
   updateSlider: (id: string, data: Partial<Slider>) => void;
@@ -82,6 +97,11 @@ const AdminContext = createContext<AdminContextType | undefined>(undefined);
 
 export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAdmin, loading } = useAuth();
+  const isAdminRef = useRef(isAdmin);
+  useEffect(() => {
+    isAdminRef.current = isAdmin;
+  }, [isAdmin]);
+
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Record<string, Category>>({});
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -90,7 +110,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [scrollingMessage, setScrollingMessageState] = useState("");
   const [contactInfo, setContactInfoState] = useState<ContactInfo>({
     phone: "", email: "", supportLink: "", whatsappNumber: "", telegramLink: "",
-    youtubeLink: "", tiktokLink: "",
+    facebookPageLink: "", instagramLink: "", youtubeLink: "", tiktokLink: "",
     paymentBkash: "", paymentNagad: "", paymentRocket: "", address: "", name: "",
     isAppLocked: false
   });
@@ -103,6 +123,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [steadfastSettings, setSteadfastSettingsState] = useState<SteadfastSettings>({
     apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care"
   });
+  const [welcomePopupSettings, setWelcomePopupSettingsState] = useState<WelcomePopupSettings>(DEFAULT_WELCOME_POPUP);
   const [uddoktaPaySettings, setUddoktaPaySettingsState] = useState<UddoktaPaySettings>(() => {
     try {
       const cached = localStorage.getItem("uddoktaPaySettings");
@@ -118,7 +139,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (loading) return;
 
     const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
-      if (snapshot.empty && isAdmin) {
+      if (snapshot.empty && isAdminRef.current) {
         // Initial seed if empty and user is admin
         ALL_PRODUCTS.forEach(p => setDoc(doc(db, "products", String(p.id)), p));
       } else {
@@ -127,7 +148,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }, (error) => handleFirestoreError(error, OperationType.GET, "products"));
 
     const unsubCategories = onSnapshot(collection(db, "categories"), (snapshot) => {
-      if (snapshot.empty && isAdmin) {
+      if (snapshot.empty && isAdminRef.current) {
         Object.entries(CATEGORY_DATA).forEach(([id, cat]) => setDoc(doc(db, "categories", id), { ...cat, id }));
       } else {
         const cats: Record<string, Category> = {};
@@ -168,7 +189,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
         if (data.sliders) setSliders(data.sliders);
         if (data.areas) setAreas(data.areas);
-      } else if (isAdmin) {
+        if (data.welcomePopupSettings) {
+          setWelcomePopupSettingsState({
+            ...DEFAULT_WELCOME_POPUP,
+            ...data.welcomePopupSettings
+          });
+        }
+      } else if (isAdminRef.current) {
         // Seed default config only if admin
         setDoc(doc(db, "configs", "main"), {
           scrollingMessage: "আমাদের শপে আপনাকে স্বাগতম!",
@@ -182,6 +209,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           telegramSettings: { botToken: "", chatId: "", isEnabled: false },
           steadfastSettings: { apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care" },
           uddoktaPaySettings: { apiKey: "", apiUrl: "https://sandbox.uddoktapay.com", isEnabled: false, isSandbox: true },
+          welcomePopupSettings: DEFAULT_WELCOME_POPUP,
           sliders: [
             { id: "1", image: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=1200", title: "New Season Style" },
             { id: "2", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=1200", title: "Smart Gadgets Edition" }
@@ -203,7 +231,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unsubConfigs();
       unsubOffers();
     };
-  }, [isAdmin, loading]);
+  }, [loading]);
 
   const updateConfig = (update: any) => {
     return setDoc(doc(db, "configs", "main"), update, { merge: true });
@@ -220,6 +248,15 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       localStorage.setItem("uddoktaPaySettings", JSON.stringify(settings));
     } catch {}
     await updateConfig({ uddoktaPaySettings: settings });
+  };
+
+  const setWelcomePopupSettings = async (settings: WelcomePopupSettings) => {
+    const clean = { ...settings };
+    if (clean.imageUrl) {
+      clean.imageUrl = await sanitizeImageBase64(clean.imageUrl, { maxWidth: 800, maxHeight: 800, quality: 0.8 });
+    }
+    setWelcomePopupSettingsState(clean);
+    await updateConfig({ welcomePopupSettings: clean });
   };
 
   const sanitizeCategoryData = async (cat: Partial<Category>): Promise<Partial<Category>> => {
@@ -315,8 +352,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   return (
     <AdminContext.Provider value={{
-      products, categories, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
-      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings,
+      products, categories, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, welcomePopupSettings, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
+      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings, setWelcomePopupSettings,
       addProduct, updateProduct, removeProduct,
       addCategory, updateCategory, removeCategory,
       addOffer, updateOffer, removeOffer,

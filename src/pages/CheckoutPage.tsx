@@ -3,7 +3,6 @@ import { ChevronLeft, Truck, MapPin, Phone, User, CreditCard, ShieldCheck, Alert
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import Header from "../components/Header";
-import Footer from "../components/Footer";
 import { useCart } from "../context/CartContext";
 import { useSettings } from "../context/SettingsContext";
 import { useOrders, Order } from "../context/OrderContext";
@@ -14,36 +13,7 @@ import { createSteadfastOrder, getSteadfastTrackingUrl } from "../utils/steadfas
 import { createUddoktaPayCharge } from "../utils/uddoktapay";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../lib/firebase";
-
-// Comprehensive location data for Bangladesh
-const BD_LOCATIONS = {
-  divisions: ["Dhaka", "Chattogram", "Rajshahi", "Khulna", "Barishal", "Sylhet", "Rangpur", "Mymensingh"],
-  districts: {
-    "Dhaka": ["Dhaka", "Gazipur", "Narayanganj", "Tangail", "Manikganj", "Munshiganj", "Narsingdi", "Faridpur", "Gopalganj", "Madaripur", "Rajbari", "Shariatpur"],
-    "Chattogram": ["Chattogram", "Cox's Bazar", "Cumilla", "Feni", "Brahmanbaria", "Noakhali", "Lakshmipur", "Chandpur", "Khagrachhari", "Rangamati", "Bandarban"],
-    "Rajshahi": ["Rajshahi", "Bogura", "Pabna", "Naogaon", "Joypurhat", "Chapai Nawabganj", "Natore", "Sirajganj"],
-    "Khulna": ["Khulna", "Jashore", "Satkhira", "Bagerhat", "Kushtia", "Meherpur", "Chuadanga", "Jhenaidah", "Magura", "Narail"],
-    "Barishal": ["Barishal", "Patuakhali", "Bhola", "Pirojpur", "Barguna", "Jhalokathi"],
-    "Sylhet": ["Sylhet", "Moulvibazar", "Habiganj", "Sunamganj"],
-    "Rangpur": ["Rangpur", "Dinajpur", "Gaibandha", "Kurigram", "Nilphamari", "Panchagarh", "Thakurgaon", "Lalmonirhat"],
-    "Mymensingh": ["Mymensingh", "Netrokona", "Sherpur", "Jamalpur"]
-  },
-  upazilas: {
-    "Dhaka": ["Dhanmondi", "Gulshan", "Uttara", "Mirpur", "Banani", "Mohammadpur", "Badda", "Savar", "Dhamrai", "Keraniganj", "Ashulia", "Pallabi", "Demra", "Hazaribagh", "Kotwali", "Sutrapur", "Tejgaon", "Khilgaon", "Cantonment", "Motijheel"],
-    "Gazipur": ["Gazipur Sadar", "Kaliakair", "Kaliganj", "Kapasia", "Sreepur", "Tongi"],
-    "Narayanganj": ["Narayanganj Sadar", "Bandar", "Araihazar", "Sonargaon", "Rupganj", "Siddhirganj"],
-    "Tangail": ["Tangail Sadar", "Sakhipur", "Basail", "Madhupur", "Ghatail", "Kalihati", "Nagarpur", "Mirzapur", "Gopalpur", "Delduar", "Bhuapur", "Dhanbari"],
-    "Manikganj": ["Manikganj Sadar", "Singair", "Shivalaya", "Saturia", "Harirampur", "Gheor", "Daulatpur"],
-    "Munshiganj": ["Munshiganj Sadar", "Sreenagar", "Sirajdikhan", "Lauhajang", "Gazaria", "Tongibari"],
-    "Narsingdi": ["Narsingdi Sadar", "Belabo", "Monohardi", "Palash", "Raipura", "Shibpur"],
-    "Faridpur": ["Faridpur Sadar", "Bhanga", "Boalmari", "Alfadanga", "Madhukhali", "Nagarkanda", "Sadarpur", "Charbhadrasan", "Saltha"],
-    "Cumilla": ["Cumilla Sadar", "Barura", "Brahmanpara", "Burichang", "Chandina", "Chauddagram", "Daudkandi", "Debidwar", "Homna", "Laksam", "Muradnagar", "Nangalkot", "Titas", "Meghna", "Monohargonj"],
-    "Chattogram": ["Chattogram Sadar", "Anwara", "Banshkhali", "Boalkhali", "Chandanaish", "Fatikchhari", "Hathazari", "Lohagara", "Mirsharai", "Patiya", "Rangunia", "Raozan", "Sandwip", "Satkania", "Sitakunda"],
-    "Bogura": ["Bogura Sadar", "Adamdighi", "Dhunat", "Dhupchanchia", "Gabtali", "Kahaloo", "Nandigram", "Sariakandi", "Sherpur", "Shibganj", "Sonatola"],
-    "Sylhet": ["Sylhet Sadar", "Beanibazar", "Bishwanath", "Dakshin Surma", "Fenchuganj", "Golapganj", "Gowainghat", "Jaintiapur", "Kanaighat", "Zakiganj"],
-    "Mymensingh": ["Mymensingh Sadar", "Bhaluka", "Fulbaria", "Gaffargaon", "Gauripur", "Haluaghat", "Ishwarganj", "Muktagacha", "Nandail", "Phulpur", "Trishal", "Tara Khanda"]
-  }
-};
+import { BD_DIVISIONS, BD_DISTRICTS, BD_UPAZILAS } from "../data/bangladeshLocations";
 
 const SPECIAL_AREAS = ["বড়িবাড়ী", "কপালেশ্বহর", "নামিলা", "সোহাগপুর", "ঝাউয়াদি", "নরদা"];
 
@@ -70,12 +40,14 @@ export default function CheckoutPage() {
     division: "",
     district: "",
     upazila: "",
+    customUpazila: "",
     note: "",
     transactionId: "",
     lastNumber: ""
   });
 
-  const [paymentMethod, setPaymentMethod] = useState<"online" | "cod">("online");
+  // Default to null so user explicitly selects Online Payment or Cash on Delivery
+  const [paymentMethod, setPaymentMethod] = useState<"online" | "cod" | null>(null);
   const [onlineMode, setOnlineMode] = useState<"gateway" | "manual">("gateway");
   const [onlineProvider, setOnlineProvider] = useState<"bkash" | "nagad" | "rocket" | "">("");
   const [showSuccess, setShowSuccess] = useState(false);
@@ -96,6 +68,8 @@ export default function CheckoutPage() {
           navigate(`/payment-verify/${pendingOrderId}?status=COMPLETED`);
         }
       }
+    }, (error) => {
+      console.warn("Pending order snapshot observer:", error);
     });
     return () => unsub();
   }, [pendingOrderId, navigate]);
@@ -159,6 +133,17 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (!paymentMethod) {
+      alert(language === 'bn' 
+        ? "দয়া করে একটি পেমেন্ট পদ্ধতি নির্বাচন করুন (অনলাইন পেমেন্ট অথবা ক্যাশ অন ডেলিভারি)" 
+        : "Please select a payment method (Online Payment or Cash on Delivery)");
+      const paymentEl = document.getElementById("checkout-payment-section");
+      if (paymentEl) {
+        paymentEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+
     if (paymentMethod === "online") {
       if (isUddoktaPayActive && (onlineMode === "gateway" || !uddoktaPaySettings?.allowManualFallback)) {
         processOnlineGatewayOrder();
@@ -175,6 +160,7 @@ export default function CheckoutPage() {
   };
 
   const processOnlineGatewayOrder = async () => {
+    const finalUpazila = formData.upazila === "Other" ? (formData.customUpazila?.trim() || "Other") : formData.upazila;
     if (!formData.name?.trim() || !formData.phone?.trim() || !formData.address?.trim() || !formData.division || !formData.district) {
       alert(language === 'bn' 
         ? "দয়া করে নাম, ফোন নম্বর, বিভাগ, জেলা এবং সম্পূর্ণ ঠিকানা পূরণ করুন" 
@@ -202,7 +188,7 @@ export default function CheckoutPage() {
         name: String(formData.name),
         phone: String(formData.phone),
         address: String(formData.address),
-        area: String(`${formData.upazila || ""}, ${formData.district}, ${formData.division}`)
+        area: String(`${finalUpazila || ""}, ${formData.district}, ${formData.division}`)
       },
       paymentMethod: 'UddoktaPay (Online Auto)',
       uddoktaPayStatus: 'pending',
@@ -272,6 +258,14 @@ export default function CheckoutPage() {
   };
 
   const processOrder = async (extraData?: { trxId?: string, last4?: string }) => {
+    const finalUpazila = formData.upazila === "Other" ? (formData.customUpazila?.trim() || "Other") : formData.upazila;
+    if (!formData.name?.trim() || !formData.phone?.trim() || !formData.address?.trim() || !formData.division || !formData.district) {
+      alert(language === 'bn' 
+        ? "দয়া করে নাম, ফোন নম্বর, বিভাগ, জেলা এবং সম্পূর্ণ ঠিকানা পূরণ করুন" 
+        : "Please fill in name, phone number, division, district, and address");
+      return;
+    }
+
     const orderData: Omit<Order, 'id'> = {
       date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }),
       status: 'Pending',
@@ -289,9 +283,9 @@ export default function CheckoutPage() {
         name: String(formData.name),
         phone: String(formData.phone),
         address: String(formData.address),
-        area: String(`${formData.upazila}, ${formData.district}, ${formData.division}`)
+        area: String(`${finalUpazila || ""}, ${formData.district}, ${formData.division}`)
       },
-      paymentMethod: paymentMethod === 'cod' ? 'Cash on Delivery' : onlineProvider.toUpperCase(),
+      paymentMethod: paymentMethod === 'cod' ? 'Cash on Delivery' : (onlineProvider ? onlineProvider.toUpperCase() : 'Online Payment'),
       transactionId: paymentMethod === 'online' ? String(extraData?.trxId || formData.transactionId || "") : "",
       lastNumber: paymentMethod === 'online' ? String(extraData?.last4 || formData.lastNumber || "") : ""
     };
@@ -448,7 +442,6 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
             </button>
           </motion.div>
         </main>
-        <Footer />
       </div>
     );
   }
@@ -456,7 +449,7 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
   return (
     <div className="min-h-screen flex flex-col font-sans dark:bg-neutral-950 transition-colors">
       <Header />
-      <main className="flex-grow py-8 pb-32">
+      <main className="flex-grow py-8 pb-28 md:pb-16">
         <div className="container mx-auto px-4">
           <div className="flex items-center gap-4 mb-8">
             <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
@@ -504,67 +497,89 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "নাম" : "Full Name"}</label>
+                    <label htmlFor="checkout-customer-name" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "নাম" : "Full Name"}</label>
                     <input 
+                      id="checkout-customer-name"
                       required
                       type="text" 
                       value={formData.name || ''}
                       onChange={(e) => setFormData({...formData, name: e.target.value})}
                       placeholder={language === 'bn' ? "আপনার নাম লিখুন" : "Full Name"}
-                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20"
+                      aria-label={language === 'bn' ? "আপনার নাম" : "Full Name"}
+                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 text-base font-medium"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "ফোন নম্বর" : "Phone Number"}</label>
+                    <label htmlFor="checkout-customer-phone" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "ফোন নম্বর" : "Phone Number"}</label>
                     <input 
+                      id="checkout-customer-phone"
                       required
                       type="tel" 
                       value={formData.phone || ''}
                       onChange={(e) => setFormData({...formData, phone: e.target.value})}
                       placeholder={language === 'bn' ? "০১৭XXXXXXXX" : "017XXXXXXXX"}
-                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20"
+                      aria-label={language === 'bn' ? "ফোন নম্বর" : "Phone Number"}
+                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 text-base font-medium"
                     />
                   </div>
 
                   <div className="space-y-4 md:col-span-2">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "বিভাগ" : "Division"}</label>
+                        <label htmlFor="checkout-customer-division" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "বিভাগ" : "Division"}</label>
                         <select 
+                          id="checkout-customer-division"
                           required
                           value={formData.division || ''}
-                          onChange={(e) => setFormData({...formData, division: e.target.value, district: "", upazila: ""})}
-                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                          onChange={(e) => setFormData({...formData, division: e.target.value, district: "", upazila: "", customUpazila: ""})}
+                          aria-label={language === 'bn' ? "বিভাগ" : "Division"}
+                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer text-base font-medium"
                         >
                           <option value="">{language === 'bn' ? "বিভাগ নির্বাচন করুন" : "Select Division"}</option>
-                          {BD_LOCATIONS.divisions.map(d => <option key={d} value={d}>{d}</option>)}
+                          {BD_DIVISIONS.map(d => (
+                            <option key={d.en} value={d.en}>
+                              {language === 'bn' ? `${d.bn} (${d.en})` : d.en}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "জেলা" : "District"}</label>
+                        <label htmlFor="checkout-customer-district" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "জেলা" : "District"}</label>
                         <select 
+                          id="checkout-customer-district"
                           disabled={!formData.division}
                           required
                           value={formData.district || ''}
-                          onChange={(e) => setFormData({...formData, district: e.target.value, upazila: ""})}
-                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer disabled:opacity-50"
+                          onChange={(e) => setFormData({...formData, district: e.target.value, upazila: "", customUpazila: ""})}
+                          aria-label={language === 'bn' ? "জেলা" : "District"}
+                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer disabled:opacity-50 text-base font-medium"
                         >
                           <option value="">{language === 'bn' ? "জেলা নির্বাচন করুন" : "Select District"}</option>
-                          {(BD_LOCATIONS.districts as any)[formData.division]?.map((d: string) => <option key={d} value={d}>{d}</option>)}
+                          {formData.division && BD_DISTRICTS[formData.division]?.map(d => (
+                            <option key={d.en} value={d.en}>
+                              {language === 'bn' ? `${d.bn} (${d.en})` : d.en}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "উপজেলা/থানা" : "Upazila/Thana"}</label>
+                        <label htmlFor="checkout-customer-upazila" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "উপজেলা/থানা" : "Upazila/Thana"}</label>
                         <select 
+                          id="checkout-customer-upazila"
                           disabled={!formData.district}
                           required
                           value={formData.upazila || ''}
-                          onChange={(e) => setFormData({...formData, upazila: e.target.value})}
-                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer disabled:opacity-50"
+                          onChange={(e) => setFormData({...formData, upazila: e.target.value, customUpazila: e.target.value === "Other" ? formData.customUpazila : ""})}
+                          aria-label={language === 'bn' ? "উপজেলা বা থানা" : "Upazila or Thana"}
+                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 cursor-pointer disabled:opacity-50 text-base font-medium"
                         >
-                          <option value="">{language === 'bn' ? "উপজেলা নির্বাচন করুন" : "Select Upazila"}</option>
-                          {(BD_LOCATIONS.upazilas as any)[formData.district]?.map((u: string) => <option key={u} value={u}>{u}</option>) || null}
-                          <option value="Other">{language === 'bn' ? "অন্যান্য" : "Other"}</option>
+                          <option value="">{language === 'bn' ? "উপজেলা/থানা নির্বাচন করুন" : "Select Upazila/Thana"}</option>
+                          {formData.district && BD_UPAZILAS[formData.district]?.map(u => (
+                            <option key={u.en} value={u.en}>
+                              {language === 'bn' ? `${u.bn} (${u.en})` : u.en}
+                            </option>
+                          ))}
+                          <option value="Other">{language === 'bn' ? "অন্যান্য (খুঁজে না পেলে লিখুন)" : "Other (Type manually)"}</option>
                         </select>
                       </div>
                     </div>
@@ -575,52 +590,70 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                         animate={{ opacity: 1, y: 0 }}
                         className="space-y-2"
                       >
-                        <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
-                          {language === 'bn' ? "উপজলার নাম লিখুন" : "Type Upazila Name"}
+                        <label htmlFor="checkout-custom-upazila" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                          {language === 'bn' ? "উপজেলার নাম লিখুন" : "Type Upazila Name"}
                         </label>
                         <input 
+                          id="checkout-custom-upazila"
                           required
                           type="text"
-                          onChange={(e) => setFormData({...formData, note: (formData.note || "") + "\nCustom Upazila: " + e.target.value})}
+                          value={formData.customUpazila || ""}
+                          onChange={(e) => setFormData({...formData, customUpazila: e.target.value})}
                           placeholder={language === 'bn' ? "উপজেলার নাম লিখুন" : "Type Upazila Name"}
-                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20"
+                          aria-label={language === 'bn' ? "উপজেলার নাম" : "Type Upazila Name"}
+                          className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 text-base font-medium"
                         />
                       </motion.div>
                     )}
                   </div>
 
                   <div className="space-y-2 md:col-span-2">
-                    <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "বিস্তারিত ঠিকানা" : "Detailed Address"}</label>
+                    <label htmlFor="checkout-customer-address" className="text-xs font-bold text-neutral-400 uppercase tracking-wider">{language === 'bn' ? "বিস্তারিত ঠিকানা" : "Detailed Address"}</label>
                     <textarea 
+                      id="checkout-customer-address"
                       required
                       value={formData.address || ''}
                       onChange={(e) => setFormData({...formData, address: e.target.value})}
                       placeholder={language === 'bn' ? "বাসা নম্বর, সড়ক নম্বর..." : "House no, Street no..."}
-                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 min-h-[100px]"
+                      aria-label={language === 'bn' ? "বিস্তারিত ঠিকানা" : "Detailed Address"}
+                      className="w-full px-5 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-2 focus:ring-primary/20 min-h-[100px] text-base font-medium"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Payment Section */}
-              <div className={`p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm ${isMixedCart ? "opacity-50 pointer-events-none" : ""}`}>
-                <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-                  <CreditCard size={20} className="text-primary" />
-                  {language === 'bn' ? "পেমেন্ট পদ্ধতি" : "Payment Method"}
-                </h3>
+              <div id="checkout-payment-section" className={`p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm ${isMixedCart ? "opacity-50 pointer-events-none" : ""}`}>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-bold flex items-center gap-2">
+                    <CreditCard size={20} className="text-primary" />
+                    {language === 'bn' ? "পেমেন্ট পদ্ধতি" : "Payment Method"}
+                  </h3>
+                  {!paymentMethod && (
+                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-3 py-1 rounded-full">
+                      {language === 'bn' ? "পদ্ধতি সিলেক্ট করুন" : "Select payment method"}
+                    </span>
+                  )}
+                </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   <div 
                     onClick={() => setPaymentMethod("online")}
                     className={`relative flex items-center gap-4 p-5 rounded-[2rem] border-2 transition-all cursor-pointer ${
-                      paymentMethod === "online" ? "border-primary bg-primary/5" : "border-neutral-100 dark:border-neutral-800"
+                      paymentMethod === "online" 
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/10 ring-2 ring-primary/20" 
+                        : "border-neutral-200 dark:border-neutral-800 hover:border-primary/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                     }`}
                   >
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${paymentMethod === "online" ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400"}`}>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${
+                      paymentMethod === "online" 
+                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                        : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400"
+                    }`}>
                       <Zap size={24} />
                     </div>
                     <div>
-                      <p className="font-bold flex items-center gap-1.5">
+                      <p className="font-bold flex items-center gap-1.5 text-neutral-900 dark:text-white">
                         {language === 'bn' ? "অনলাইন পেমেন্ট" : "Online Payment"}
                         {isUddoktaPayActive && (
                           <span className="text-[9px] bg-primary text-white font-black px-2 py-0.5 rounded-md uppercase tracking-wider">Auto</span>
@@ -628,7 +661,7 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                       </p>
                       <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">{language === 'bn' ? "বিকাশ, নগদ, রকেট, কার্ড" : "bKash, Nagad, Rocket, Cards"}</p>
                     </div>
-                    {paymentMethod === "online" && <CheckCircle2 size={20} className="ml-auto text-primary" />}
+                    {paymentMethod === "online" && <CheckCircle2 size={20} className="ml-auto text-primary shrink-0" />}
                   </div>
 
                   <div 
@@ -637,19 +670,54 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                       setOnlineProvider("");
                     }}
                     className={`relative flex items-center gap-4 p-5 rounded-[2rem] border-2 transition-all cursor-pointer ${
-                      paymentMethod === "cod" ? "border-primary bg-primary/5" : "border-neutral-100 dark:border-neutral-800"
+                      paymentMethod === "cod" 
+                        ? "border-primary bg-primary/5 shadow-md shadow-primary/10 ring-2 ring-primary/20" 
+                        : "border-neutral-200 dark:border-neutral-800 hover:border-primary/50 hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                     }`}
                   >
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${paymentMethod === "cod" ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-neutral-100 dark:border-neutral-800 text-neutral-400"}`}>
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${
+                      paymentMethod === "cod" 
+                        ? "bg-primary text-white shadow-lg shadow-primary/20" 
+                        : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400"
+                    }`}>
                       <Truck size={24} />
                     </div>
                     <div>
-                      <p className="font-bold">{language === 'bn' ? "ক্যাশ অন ডেলিভারি" : "Cash on Delivery"}</p>
-                      <p className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">+৳২০ {language === 'bn' ? "সার্ভিস চার্জ" : "Service Charge"}</p>
+                      <p className="font-bold text-neutral-900 dark:text-white">{language === 'bn' ? "ক্যাশ অন ডেলিভারি" : "Cash on Delivery"}</p>
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider">+৳২০ {language === 'bn' ? "সার্ভিস চার্জ (হাতে পেয়ে মূল্য পরিশোধ)" : "Service Charge"}</p>
                     </div>
-                    {paymentMethod === "cod" && <CheckCircle2 size={20} className="ml-auto text-primary" />}
+                    {paymentMethod === "cod" && <CheckCircle2 size={20} className="ml-auto text-primary shrink-0" />}
                   </div>
                 </div>
+
+                {/* Guidance when neither payment method is clicked yet */}
+                {!paymentMethod && (
+                  <div className="mb-4 p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 flex items-center gap-3 text-amber-900 dark:text-amber-200 text-xs font-semibold">
+                    <AlertCircle size={18} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>
+                      {language === 'bn' 
+                        ? "👉 অর্ডার করতে অনুগ্রহ করে ওপরের যেকোনো একটি মাধ্যমে (অনলাইন পেমেন্ট অথবা ক্যাশ অন ডেলিভারি) ক্লিক করুন।" 
+                        : "👉 Please click either Online Payment or Cash on Delivery above to choose how to pay."}
+                    </span>
+                  </div>
+                )}
+
+                {/* COD selected confirmation badge */}
+                {paymentMethod === "cod" && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mb-4 p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex items-center gap-3 text-emerald-900 dark:text-emerald-200 text-xs font-semibold"
+                  >
+                    <CheckCircle2 size={18} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span>
+                      {language === 'bn' 
+                        ? "ক্যাশ অন ডেলিভারি নির্বাচিত হয়েছে। পণ্য ডেলিভারি পেয়ে মূল্য ও ২০ টাকা সার্ভিস চার্জ পরিশোধ করুন।" 
+                        : "Cash on Delivery selected. Pay the total amount when your delivery arrives."}
+                    </span>
+                  </motion.div>
+                )}
 
                 <AnimatePresence>
                   {paymentMethod === "online" && (
@@ -782,6 +850,16 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                       <span className={`font-black ${formData.district === "Dhaka" ? "text-green-500" : "text-neutral-800 dark:text-white"}`}>৳{deliveryFee}</span>
                     )}
                   </div>
+                  <div className="flex justify-between text-neutral-500 font-medium">
+                    <span>{language === 'bn' ? "পেমেন্ট মাধ্যম" : "Payment Method"}</span>
+                    <span className={paymentMethod ? "font-bold text-neutral-800 dark:text-white" : "font-semibold text-amber-600 dark:text-amber-400"}>
+                      {paymentMethod === "online" 
+                        ? (language === 'bn' ? "অনলাইন পেমেন্ট" : "Online Payment") 
+                        : paymentMethod === "cod" 
+                          ? (language === 'bn' ? "ক্যাশ অন ডেলিভারি" : "Cash on Delivery") 
+                          : (language === 'bn' ? "সিলেক্ট করা হয়নি" : "Not Selected")}
+                    </span>
+                  </div>
                   <AnimatePresence>
                     {codFee > 0 && (
                       <motion.div 
@@ -808,7 +886,9 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                   className={`w-full py-5 rounded-[1.5rem] font-black text-lg shadow-lg flex items-center justify-center gap-3 group transition-all ${
                     isMixedCart || isRedirectingPayment
                       ? "bg-neutral-200 dark:bg-neutral-800 text-neutral-400 cursor-not-allowed shadow-none" 
-                      : "bg-primary text-white shadow-primary/20 hover:scale-[1.02] active:scale-95"
+                      : !paymentMethod 
+                        ? "bg-primary/90 text-white shadow-primary/20 hover:scale-[1.02] active:scale-95 ring-2 ring-primary/30"
+                        : "bg-primary text-white shadow-primary/20 hover:scale-[1.02] active:scale-95"
                   }`}
                 >
                   {isRedirectingPayment ? (
@@ -828,6 +908,16 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                           <Zap size={24} className="group-hover:scale-110 transition-transform text-amber-300" />
                           <span>{language === 'bn' ? "পেমেন্ট করুন ও কনফার্ম করুন" : "Pay & Confirm Order"}</span>
                           <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform ml-1" />
+                        </>
+                      ) : paymentMethod === 'cod' ? (
+                        <>
+                          <Truck size={24} className="group-hover:scale-110 transition-transform text-white" />
+                          <span>{language === 'bn' ? "ক্যাশ অন ডেলিভারিতে অর্ডার কনফার্ম করুন" : "Confirm COD Order"}</span>
+                        </>
+                      ) : !paymentMethod ? (
+                        <>
+                          <CreditCard size={24} />
+                          <span>{language === 'bn' ? "পেমেন্ট পদ্ধতি বেছে নিন" : "Select Payment Method"}</span>
                         </>
                       ) : (
                         <>
@@ -855,7 +945,6 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
           </form>
         </div>
       </main>
-      <Footer />
 
       {/* Payment Modal */}
       <AnimatePresence>
@@ -911,7 +1000,7 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                     value={paymentDetails.trxId || ''}
                     onChange={(e) => setPaymentDetails({...paymentDetails, trxId: e.target.value})}
                     placeholder="TRX123456789"
-                    className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-4 focus:ring-primary/10 font-bold placeholder:opacity-30"
+                    className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-4 focus:ring-primary/10 text-base font-bold placeholder:opacity-30"
                   />
                 </div>
                 <div className="space-y-2">
@@ -925,7 +1014,7 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
                     value={paymentDetails.last4 || ''}
                     onChange={(e) => setPaymentDetails({...paymentDetails, last4: e.target.value})}
                     placeholder="1234"
-                    className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-4 focus:ring-primary/10 font-bold placeholder:opacity-30"
+                    className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none focus:ring-4 focus:ring-primary/10 text-base font-bold placeholder:opacity-30"
                   />
                 </div>
                 

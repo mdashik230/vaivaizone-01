@@ -25,7 +25,7 @@ export default function CartPage() {
       <main className="flex-grow py-8 pb-28 md:pb-16">
         <div className="container mx-auto px-4">
           <div className="flex items-center gap-4 mb-8">
-            <button onClick={() => navigate(-1)} className="p-2 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+            <button onClick={() => navigate(-1)} aria-label="Go back" className="p-2 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
               <ChevronLeft size={20} />
             </button>
             <h1 className="text-3xl font-black text-neutral-900 dark:text-white">
@@ -67,6 +67,7 @@ export default function CartPage() {
                     </div>
                     <button 
                       onClick={() => removeFromCart(item.id)}
+                      aria-label={`Remove ${item.name} from cart`}
                       className="p-3 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-2xl transition-all"
                     >
                       <Trash2 size={20} />

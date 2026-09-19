@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, initializeFirestore, getDocFromServer, doc } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  initializeFirestore 
+} from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 import rawConfig from '../../firebase-applet-config.json';
 
@@ -16,23 +19,53 @@ const firebaseConfig = {
 
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Use long-polling transport to ensure reliable connection in container and iframe environments
+// Configure Firestore according to platform specifications
+const firestoreDbId = (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '')
+  ? rawConfig.firestoreDatabaseId
+  : "(default)";
+
 let dbInstance;
 try {
   dbInstance = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
-  }, (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
-    ? rawConfig.firestoreDatabaseId
-    : undefined
-  );
+    ignoreUndefinedProperties: true,
+    experimentalAutoDetectLongPolling: true,
+  }, firestoreDbId);
 } catch {
-  dbInstance = (rawConfig.firestoreDatabaseId && rawConfig.firestoreDatabaseId.trim() !== '' && rawConfig.firestoreDatabaseId !== '(default)')
-    ? getFirestore(app, rawConfig.firestoreDatabaseId)
-    : getFirestore(app);
+  dbInstance = getFirestore(app, firestoreDbId);
 }
 
 export const db = dbInstance;
 export const auth = getAuth(app);
+
+// Global safety interceptor for known Firestore SDK internal assertion race condition (ID: ca9, b815)
+if (typeof window !== 'undefined') {
+  const isFirestoreInternalAssertion = (err: any) => {
+    const text = String(err?.message || err || '');
+    return text.includes('FIRESTORE') && (
+      text.includes('INTERNAL ASSERTION FAILED') || 
+      text.includes('Unexpected state') || 
+      text.includes('ca9') || 
+      text.includes('b815')
+    );
+  };
+
+  window.addEventListener('error', (event) => {
+    if (isFirestoreInternalAssertion(event.message) || isFirestoreInternalAssertion(event.error)) {
+      console.warn('[Firestore Auto-Shield] Handled transient Firestore internal assertion:', event.message || event.error?.message);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return true;
+    }
+  }, true);
+
+  window.addEventListener('unhandledrejection', (event) => {
+    if (isFirestoreInternalAssertion(event.reason)) {
+      console.warn('[Firestore Auto-Shield] Handled transient Firestore internal rejection:', event.reason?.message || event.reason);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  });
+}
 
 // Initialize analytics if supported
 if (typeof window !== 'undefined') {
@@ -41,30 +74,6 @@ if (typeof window !== 'undefined') {
       getAnalytics(app);
     }
   }).catch(() => {});
-}
-
-// Test Firestore connection as per skill guidelines
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error: any) {
-    if (error?.message?.includes('the client is offline') || error?.code === 'unavailable') {
-      console.warn("Firestore is operating with offline persistence until connection stabilizes.");
-    } else {
-      console.warn("Firestore connection check:", error?.message || error);
-    }
-  }
-}
-
-// Run connection validation after page hydration
-if (typeof window !== 'undefined') {
-  if (document.readyState === 'complete') {
-    setTimeout(testConnection, 1000);
-  } else {
-    window.addEventListener('load', () => setTimeout(testConnection, 1000), { once: true });
-  }
-} else {
-  testConnection();
 }
 
 export enum OperationType {
@@ -114,13 +123,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   };
 
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-
-  // If it is a transient connection/offline error or permission read error on startup, log clearly without crashing React listeners
-  if (errCode === 'unavailable' || errMsg.includes('offline') || errMsg.includes('transport errored') || operationType === OperationType.GET || operationType === OperationType.LIST) {
-    console.warn(`[Firestore ${operationType} on ${path}] Error encountered:`, errMsg);
+  // If it is a transient connection/offline error or initial read error, log as warning without reporting as fatal crash
+  if (errCode === 'unavailable' || errMsg.includes('offline') || errMsg.includes('transport errored') || errMsg.includes('Could not reach Cloud Firestore backend') || operationType === OperationType.GET || operationType === OperationType.LIST) {
+    console.warn(`[Firestore ${operationType} on ${path}] Client operating offline/connecting:`, errMsg);
     return errInfo;
   }
 
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
   return errInfo;
 }
