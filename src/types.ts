@@ -120,14 +120,3 @@ export interface UddoktaPayVerifyResponse {
   metadata?: Record<string, any>;
   message?: string;
 }
-
-export interface WelcomePopupSettings {
-  isEnabled: boolean;
-  title: string;
-  message: string;
-  badgeText?: string;
-  imageUrl?: string;
-  buttonText: string;
-  buttonLink: string;
-  showOncePerSession?: boolean;
-}

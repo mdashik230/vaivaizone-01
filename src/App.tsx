@@ -12,15 +12,14 @@ import { OrderProvider } from "./context/OrderContext";
 import { AdminProvider } from "./context/AdminContext";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import FloatingWhatsApp from "./components/FloatingWhatsApp";
-import WelcomePopup from "./components/WelcomePopup";
 import { AnimatePresence } from "motion/react";
 import { useAdmin } from "./context/AdminContext";
 import { Lock, LogOut, LogIn, ShieldCheck } from "lucide-react";
 import React, { Suspense, lazy } from "react";
 import { Navigate } from "react-router-dom";
+import HomePage from "./pages/HomePage";
 
-// Lazy load pages
-const HomePage = lazy(() => import("./pages/HomePage"));
+// Lazy load secondary pages
 const CategoryPage = lazy(() => import("./pages/CategoryPage"));
 const SubCategoryPage = lazy(() => import("./pages/SubCategoryPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
@@ -167,7 +166,6 @@ export default function App() {
               <CartProvider>
                 <OrderProvider>
                   <ScrollToTop />
-                  <WelcomePopup />
                   <AnimatedRoutes />
                   <BottomNav />
                   <FloatingWhatsApp />

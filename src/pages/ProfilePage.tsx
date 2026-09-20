@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from "react";
 import Header from "../components/Header";
-import { User, Package, MapPin, Heart, Settings, LogOut, ChevronRight, Tag, ArrowLeft, Plus, Trash2, Edit2, Globe, Moon, Bell, CreditCard, LogIn, ChevronDown, ChevronUp, ShoppingBag, Check, Ban, Phone, Calendar, Truck, ExternalLink } from "lucide-react";
+import { User, Package, MapPin, Heart, Settings, LogOut, ChevronRight, Tag, ArrowLeft, Plus, Trash2, Edit2, Globe, Moon, Bell, CreditCard, LogIn, ChevronDown, ChevronUp, ShoppingBag, Check, Ban, Phone, Calendar, Truck, ExternalLink, BookmarkCheck, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useSettings } from "../context/SettingsContext";
 import { useOrders } from "../context/OrderContext";
 import { useCart } from "../context/CartContext";
 import { useAdmin } from "../context/AdminContext";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, UserSavedAddress } from "../context/AuthContext";
 import { doc, updateDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { formatSteadfastStatus } from "../utils/steadfast";
+import { BD_DIVISIONS, BD_DISTRICTS, BD_UPAZILAS } from "../data/bangladeshLocations";
 
 type Tab = "main" | "orders" | "addresses" | "wishlist" | "settings" | "editProfile" | "admin";
 
@@ -27,17 +28,135 @@ export default function ProfilePage() {
   // Get actual product data for wishlist items
   const wishlistItems = allProducts.filter(product => wishlistIds.includes(product.id.toString()));
   
-  const [addresses, setAddresses] = useState<{id: number, type: string, address: string, phone: string}[]>(() => {
-    const saved = localStorage.getItem("user_addresses");
-    return saved ? JSON.parse(saved) : [];
+  const [addresses, setAddresses] = useState<UserSavedAddress[]>(() => {
+    try {
+      const saved = localStorage.getItem("user_addresses");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAddingAddress, setIsAddingAddress] = useState(false);
+  const [newAddr, setNewAddr] = useState({
+    type: "বাসা",
+    name: "",
+    phone: "",
+    address: "",
+    division: "",
+    district: "",
+    upazila: "",
+    customUpazila: "",
+    isDefault: false
   });
   
+  // Sync addresses from Firestore user profile if available
   useEffect(() => {
-    localStorage.setItem("user_addresses", JSON.stringify(addresses));
-  }, [addresses]);
+    if (userProfile?.addresses && Array.isArray(userProfile.addresses) && userProfile.addresses.length > 0) {
+      setAddresses(prev => {
+        const addrMap = new Map<string, UserSavedAddress>();
+        userProfile.addresses?.forEach(a => {
+          if (a?.address) addrMap.set(a.address.trim(), a);
+        });
+        prev.forEach(a => {
+          if (a?.address && !addrMap.has(a.address.trim())) {
+            addrMap.set(a.address.trim(), a);
+          }
+        });
+        const merged = Array.from(addrMap.values());
+        localStorage.setItem("user_addresses", JSON.stringify(merged));
+        return merged;
+      });
+    } else if (userProfile?.address) {
+      setAddresses(prev => {
+        if (!prev.some(a => a.address.trim() === userProfile.address!.trim())) {
+          const single: UserSavedAddress = {
+            id: Date.now(),
+            type: language === 'bn' ? "বাসা" : "Home",
+            name: userProfile.displayName || user?.displayName || "",
+            phone: userProfile.phone || "",
+            address: userProfile.address!,
+            division: userProfile.division || "",
+            district: userProfile.district || "",
+            upazila: userProfile.upazila || "",
+            isDefault: true
+          };
+          const merged = [single, ...prev];
+          localStorage.setItem("user_addresses", JSON.stringify(merged));
+          return merged;
+        }
+        return prev;
+      });
+    }
+  }, [userProfile, language, user]);
 
-  const deleteAddress = (id: number) => {
-    setAddresses(addresses.filter(a => a.id !== id));
+  const saveAddressList = async (updatedList: UserSavedAddress[]) => {
+    setAddresses(updatedList);
+    localStorage.setItem("user_addresses", JSON.stringify(updatedList));
+    if (user) {
+      try {
+        const primary = updatedList.find(a => a.isDefault) || updatedList[0];
+        await updateDoc(doc(db, "users", user.uid), {
+          addresses: updatedList,
+          ...(primary ? {
+            address: primary.address,
+            phone: primary.phone || userProfile?.phone || "",
+            division: primary.division || "",
+            district: primary.district || "",
+            upazila: primary.upazila || ""
+          } : {})
+        });
+      } catch (err) {
+        console.warn("Error updating user addresses in Firestore:", err);
+      }
+    }
+  };
+
+  const handleAddAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAddr.address.trim() || !newAddr.phone.trim()) {
+      alert(language === 'bn' ? "দয়া করে ফোন নম্বর ও ঠিকানা পূরণ করুন" : "Please provide phone number and detailed address");
+      return;
+    }
+
+    const created: UserSavedAddress = {
+      id: Date.now(),
+      type: newAddr.type || (language === 'bn' ? "বাসা" : "Home"),
+      name: newAddr.name.trim() || userProfile?.displayName || user?.displayName || "",
+      phone: newAddr.phone.trim(),
+      address: newAddr.address.trim(),
+      division: newAddr.division,
+      district: newAddr.district,
+      upazila: newAddr.upazila === "Other" && newAddr.customUpazila ? newAddr.customUpazila : newAddr.upazila,
+      customUpazila: newAddr.customUpazila,
+      isDefault: newAddr.isDefault || addresses.length === 0
+    };
+
+    let updatedList: UserSavedAddress[];
+    if (created.isDefault) {
+      updatedList = [created, ...addresses.map(a => ({ ...a, isDefault: false }))];
+    } else {
+      updatedList = [...addresses, created];
+    }
+
+    await saveAddressList(updatedList);
+    setIsAddingAddress(false);
+    setNewAddr({
+      type: language === 'bn' ? "বাসা" : "Home",
+      name: "",
+      phone: "",
+      address: "",
+      division: "",
+      district: "",
+      upazila: "",
+      customUpazila: "",
+      isDefault: false
+    });
+  };
+
+  const deleteAddress = async (id: number | string) => {
+    const updated = addresses.filter(a => String(a.id) !== String(id));
+    await saveAddressList(updated);
   };
   
   
@@ -269,42 +388,300 @@ export default function ProfilePage() {
 
       case "addresses":
         return (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-black text-neutral-900 dark:text-white underline decoration-primary decoration-4 underline-offset-8">{t("address")}</h2>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between flex-wrap gap-4 mb-2">
+              <div>
+                <h2 className="text-xl font-black text-neutral-900 dark:text-white underline decoration-primary decoration-4 underline-offset-8">{t("address")}</h2>
+                <p className="text-xs text-neutral-500 mt-2">
+                  {language === 'bn' ? 'অর্ডার সম্পূর্ণ করতে এখানে সেভ করা ঠিকানা এক ক্লিকে ব্যবহার করা যাবে' : 'Addresses saved here can be auto-filled in checkout with 1 click'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewAddr({
+                    type: language === 'bn' ? "বাসা" : "Home",
+                    name: userProfile?.displayName || user?.displayName || "",
+                    phone: userProfile?.phone || "",
+                    address: "",
+                    division: "",
+                    district: "",
+                    upazila: "",
+                    customUpazila: "",
+                    isDefault: addresses.length === 0
+                  });
+                  setIsAddingAddress(true);
+                }}
+                className="bg-primary text-white text-xs font-black px-4 py-2.5 rounded-2xl flex items-center gap-1.5 shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all"
+              >
+                <Plus size={16} />
+                <span>{language === 'bn' ? 'নতুন ঠিকানা যোগ করুন' : 'Add New Address'}</span>
+              </button>
             </div>
+
+            {/* Add Address Form Modal / Card */}
+            {isAddingAddress && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white dark:bg-neutral-900 p-6 md:p-8 rounded-[2rem] border-2 border-primary/20 shadow-xl space-y-4"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-neutral-100 dark:border-neutral-800">
+                  <div className="flex items-center gap-2">
+                    <BookmarkCheck size={20} className="text-primary" />
+                    <h3 className="font-black text-neutral-900 dark:text-white text-base">
+                      {language === 'bn' ? 'নতুন ডেলিভারি ঠিকানা যোগ করুন' : 'Add New Delivery Address'}
+                    </h3>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setIsAddingAddress(false)}
+                    className="p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleAddAddress} className="space-y-4">
+                  {/* Address Type selection */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-neutral-400 uppercase">{language === 'bn' ? 'ঠিকানার ধরন:' : 'Label:'}</span>
+                    {["বাসা", "অফিস", "অন্যান্য"].map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setNewAddr({ ...newAddr, type })}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
+                          newAddr.type === type
+                            ? 'bg-primary text-white border-primary shadow-sm'
+                            : 'bg-neutral-50 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-700'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'প্রাপকের নাম' : 'Recipient Name'}
+                      </label>
+                      <input
+                        type="text"
+                        value={newAddr.name}
+                        onChange={e => setNewAddr({ ...newAddr, name: e.target.value })}
+                        placeholder={language === 'bn' ? 'আপনার নাম লিখুন' : 'Full Name'}
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'ফোন নম্বর *' : 'Phone Number *'}
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={newAddr.phone}
+                        onChange={e => setNewAddr({ ...newAddr, phone: e.target.value })}
+                        placeholder="01XXXXXXXXX"
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium"
+                      />
+                    </div>
+                  </div>
+
+                  {/* BD Division, District, Upazila */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'বিভাগ' : 'Division'}
+                      </label>
+                      <select
+                        value={newAddr.division}
+                        onChange={e => setNewAddr({ ...newAddr, division: e.target.value, district: "", upazila: "", customUpazila: "" })}
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium cursor-pointer"
+                      >
+                        <option value="">{language === 'bn' ? 'বিভাগ নির্বাচন' : 'Select Division'}</option>
+                        {BD_DIVISIONS.map(d => (
+                          <option key={d.en} value={d.en}>
+                            {language === 'bn' ? `${d.bn} (${d.en})` : d.en}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'জেলা' : 'District'}
+                      </label>
+                      <select
+                        disabled={!newAddr.division}
+                        value={newAddr.district}
+                        onChange={e => setNewAddr({ ...newAddr, district: e.target.value, upazila: "", customUpazila: "" })}
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium cursor-pointer disabled:opacity-50"
+                      >
+                        <option value="">{language === 'bn' ? 'জেলা নির্বাচন' : 'Select District'}</option>
+                        {newAddr.division && BD_DISTRICTS[newAddr.division]?.map(d => (
+                          <option key={d.en} value={d.en}>
+                            {language === 'bn' ? `${d.bn} (${d.en})` : d.en}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'উপজেলা/থানা' : 'Upazila/Thana'}
+                      </label>
+                      <select
+                        disabled={!newAddr.district}
+                        value={newAddr.upazila}
+                        onChange={e => setNewAddr({ ...newAddr, upazila: e.target.value, customUpazila: e.target.value === 'Other' ? newAddr.customUpazila : '' })}
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium cursor-pointer disabled:opacity-50"
+                      >
+                        <option value="">{language === 'bn' ? 'উপজেলা নির্বাচন' : 'Select Upazila'}</option>
+                        {newAddr.district && BD_UPAZILAS[newAddr.district]?.map(u => (
+                          <option key={u.en} value={u.en}>
+                            {language === 'bn' ? `${u.bn} (${u.en})` : u.en}
+                          </option>
+                        ))}
+                        <option value="Other">{language === 'bn' ? 'অন্যান্য' : 'Other'}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {newAddr.upazila === "Other" && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                        {language === 'bn' ? 'উপজেলার নাম লিখুন' : 'Type Upazila'}
+                      </label>
+                      <input
+                        type="text"
+                        value={newAddr.customUpazila}
+                        onChange={e => setNewAddr({ ...newAddr, customUpazila: e.target.value })}
+                        placeholder={language === 'bn' ? 'উপজেলার নাম' : 'Upazila name'}
+                        className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium"
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-400 uppercase ml-1">
+                      {language === 'bn' ? 'বিস্তারিত ঠিকানা (রোড, বাড়ি, ফ্ল্যাট, গ্রাম ইত্যাদি) *' : 'Detailed Address (Road, House, Village) *'}
+                    </label>
+                    <textarea
+                      required
+                      rows={2}
+                      value={newAddr.address}
+                      onChange={e => setNewAddr({ ...newAddr, address: e.target.value })}
+                      placeholder={language === 'bn' ? 'বাসা নং, রোড নং, এলাকা...' : 'House no, Road no, Area...'}
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-3.5 text-sm focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium"
+                    />
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={newAddr.isDefault}
+                      onChange={e => setNewAddr({ ...newAddr, isDefault: e.target.checked })}
+                      className="rounded border-neutral-300 text-primary focus:ring-primary w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                      {language === 'bn' ? 'এটি আমার প্রধান (ডিফল্ট) ডেলিভারি ঠিকানা হিসেবে সেট করুন' : 'Set as primary delivery address'}
+                    </span>
+                  </label>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="submit"
+                      className="bg-primary text-white text-xs font-black px-6 py-3 rounded-xl shadow-md hover:scale-105 active:scale-95 transition-all"
+                    >
+                      {language === 'bn' ? 'ঠিকানা সেভ করুন' : 'Save Address'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingAddress(false)}
+                      className="bg-neutral-100 dark:bg-neutral-800 text-neutral-500 text-xs font-bold px-4 py-3 rounded-xl hover:bg-neutral-200 transition-colors"
+                    >
+                      {language === 'bn' ? 'বাতিল' : 'Cancel'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            )}
             
             {addresses.length === 0 ? (
               <div className="bg-white dark:bg-neutral-900 p-12 rounded-[2.5rem] border border-dashed border-neutral-200 dark:border-neutral-800 text-center">
                 <div className="w-16 h-16 bg-neutral-50 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4 text-neutral-300">
                   <MapPin size={32} />
                 </div>
-                <p className="text-neutral-500 dark:text-neutral-400 font-bold">
-                  {language === 'bn' ? 'অর্ডার করলে আপনার ঠিকানা এখানে সংরক্ষিত হবে' : 'Your address will be saved here after ordering'}
+                <p className="text-neutral-700 dark:text-neutral-300 font-bold mb-2">
+                  {language === 'bn' ? 'কোনো সংরক্ষিত ঠিকানা নেই' : 'No saved addresses yet'}
                 </p>
+                <p className="text-xs text-neutral-400 max-w-sm mx-auto mb-6">
+                  {language === 'bn' ? 'এখানে ঠিকানা যোগ করে রাখলে অর্ডার সম্পূর্ণ করার সময় ১ ক্লিকেই স্বয়ংক্রিয়ভাবে বসে যাবে।' : 'Add your address here to auto-fill it with 1 click during checkout.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingAddress(true)}
+                  className="bg-primary text-white text-xs font-black px-5 py-3 rounded-2xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all inline-flex items-center gap-1.5"
+                >
+                  <Plus size={16} />
+                  <span>{language === 'bn' ? 'প্রথম ঠিকানা যোগ করুন' : 'Add First Address'}</span>
+                </button>
               </div>
             ) : (
-              addresses.map((addr) => (
-                <div key={addr.id} className="bg-white dark:bg-neutral-900 p-6 rounded-3xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative group transition-colors">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="p-2 bg-primary/5 dark:bg-primary/10 text-primary rounded-lg">
-                      <MapPin size={18} />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {addresses.map((addr) => (
+                  <div 
+                    key={addr.id} 
+                    className="bg-white dark:bg-neutral-900 p-6 rounded-3xl border border-neutral-100 dark:border-neutral-800 shadow-sm relative group transition-colors hover:border-primary/30"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="p-2 bg-primary/10 text-primary rounded-xl">
+                          <MapPin size={18} />
+                        </div>
+                        <span className="font-bold text-neutral-900 dark:text-neutral-100 text-sm">
+                          {addr.type || 'ঠিকানা'}
+                        </span>
+                        {addr.isDefault && (
+                          <span className="text-[10px] font-black bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                            {language === 'bn' ? 'প্রধান ঠিকানা' : 'Primary'}
+                          </span>
+                        )}
+                      </div>
+
+                      <button 
+                        type="button"
+                        onClick={() => deleteAddress(addr.id)}
+                        className="p-2 text-neutral-400 hover:text-red-500 rounded-lg transition-colors"
+                        title={language === 'bn' ? 'মুছে ফেলুন' : 'Delete'}
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
-                    <span className="font-bold text-neutral-900 dark:text-neutral-100">{addr.type}</span>
+
+                    {addr.name && (
+                      <p className="text-xs font-bold text-neutral-800 dark:text-neutral-200 mb-1">
+                        {addr.name}
+                      </p>
+                    )}
+                    <p className="text-sm text-neutral-600 dark:text-neutral-300 mb-2 leading-relaxed">
+                      {addr.address}
+                    </p>
+                    {(addr.upazila || addr.district || addr.division) && (
+                      <p className="text-xs font-semibold text-primary mb-2">
+                        {[addr.upazila, addr.district, addr.division].filter(Boolean).join(", ")}
+                      </p>
+                    )}
+                    <p className="text-xs font-mono font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                      <Phone size={12} />
+                      {addr.phone}
+                    </p>
                   </div>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-2">{addr.address}</p>
-                  <p className="text-sm font-bold text-neutral-900 dark:text-neutral-200">{addr.phone}</p>
-                  
-                  <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={() => deleteAddress(addr.id)}
-                      className="p-2 bg-neutral-50 dark:bg-neutral-800 text-neutral-400 hover:text-red-500 rounded-lg transition-colors"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
         );
@@ -444,14 +821,31 @@ export default function ProfilePage() {
                   const name = formData.get("name") as string;
                   const phone = formData.get("phone") as string;
                   const dob = formData.get("dob") as string;
+                  const address = (formData.get("address") as string) || "";
                   
                   try {
                     await updateDoc(doc(db, "users", user.uid), {
                       displayName: name,
                       phone: phone,
                       dob: dob,
+                      ...(address ? { address } : {}),
                       updatedAt: new Date().toISOString()
                     });
+                    
+                    if (address) {
+                      const updatedLocal: UserSavedAddress = {
+                        id: Date.now(),
+                        type: language === 'bn' ? "বাসা" : "Home",
+                        name: name,
+                        phone: phone,
+                        address: address,
+                        isDefault: true
+                      };
+                      const nextList = [updatedLocal, ...addresses.filter(a => a.address !== address)];
+                      setAddresses(nextList);
+                      localStorage.setItem("user_addresses", JSON.stringify(nextList));
+                    }
+
                     setActiveTab("main");
                   } catch (err) {
                     handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
@@ -494,6 +888,16 @@ export default function ProfilePage() {
                       type="date" 
                       defaultValue={userProfile?.dob || ''}
                       className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-mono font-medium" 
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-bold text-neutral-400 uppercase ml-1">{language === 'bn' ? 'ডেলিভারি ঠিকানা' : 'Delivery Address'}</label>
+                    <textarea 
+                      name="address"
+                      rows={2}
+                      defaultValue={userProfile?.address || addresses[0]?.address || ''} 
+                      placeholder={language === 'bn' ? 'রোড, বাসা নং, থানা/উপজেলা, জেলা...' : 'Road, House No, Area, Thana/District...'}
+                      className="w-full bg-neutral-50 dark:bg-neutral-800 border-none rounded-2xl p-4 text-base focus:ring-2 focus:ring-primary/20 outline-none dark:text-neutral-100 font-medium" 
                     />
                   </div>
                 </div>

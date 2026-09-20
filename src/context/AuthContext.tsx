@@ -3,6 +3,19 @@ import { User, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup 
 import { doc, setDoc, serverTimestamp, getDoc, onSnapshot as onDocSnapshot } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
+export interface UserSavedAddress {
+  id: string | number;
+  type?: string;
+  name?: string;
+  phone?: string;
+  address: string;
+  division?: string;
+  district?: string;
+  upazila?: string;
+  customUpazila?: string;
+  isDefault?: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   email: string | null;
@@ -12,6 +25,11 @@ export interface UserProfile {
   isVerified?: boolean;
   phone?: string;
   dob?: string;
+  address?: string;
+  division?: string;
+  district?: string;
+  upazila?: string;
+  addresses?: UserSavedAddress[];
 }
 
 interface AuthContextType {

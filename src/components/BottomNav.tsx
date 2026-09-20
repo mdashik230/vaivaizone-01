@@ -62,6 +62,7 @@ export default function BottomNav() {
               <button
                 key={item.path}
                 onClick={() => handleNavClick(item.path)}
+                aria-label={item.name}
                 className={`flex flex-col items-center justify-center w-full transition-colors ${
                   isActive ? "text-primary" : "text-neutral-500 dark:text-neutral-400"
                 }`}
@@ -82,6 +83,7 @@ export default function BottomNav() {
           {/* 3 Dot More Button */}
           <button
             onClick={() => setIsMoreMenuOpen(true)}
+            aria-label={language === 'bn' ? 'আরও মেনু' : 'More Menu'}
             className="flex flex-col items-center justify-center w-full text-neutral-500 dark:text-neutral-400"
           >
             <MoreHorizontal size={20} />
@@ -99,7 +101,7 @@ export default function BottomNav() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMoreMenuOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100]"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
             />
             <motion.div
               initial={{ y: "100%" }}
@@ -114,6 +116,7 @@ export default function BottomNav() {
                 </h3>
                 <button
                   onClick={() => setIsMoreMenuOpen(false)}
+                  aria-label="Close menu"
                   className="bg-neutral-100 dark:bg-neutral-800 p-2.5 rounded-full text-neutral-500 hover:text-primary transition-colors"
                 >
                   <X size={20} />

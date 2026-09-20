@@ -100,6 +100,7 @@ export default function FeaturedProducts() {
                         e.stopPropagation(); 
                         addToCart(product, 1);
                       }} 
+                      aria-label={`অর্ডার বা কার্ট-এ যোগ করুন (${product.name})`}
                       className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 p-1.5 md:p-2 rounded-lg hover:bg-primary hover:text-white transition-all shadow-sm active:scale-90"
                     >
                       <ShoppingBag size={16} />
@@ -112,6 +113,7 @@ export default function FeaturedProducts() {
               <div className="absolute top-2 right-2 flex flex-col gap-2 transform translate-x-12 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none group-hover:pointer-events-auto">
                 <button 
                   onClick={() => toggleWishlist(product.id)}
+                  aria-label={`উইশলিস্টে যোগ করুন (${product.name})`}
                   className={`p-1.5 rounded-full shadow-md transition-all pointer-events-auto ${
                     wishlist.includes(product.id) 
                       ? "bg-red-50 text-red-500" 

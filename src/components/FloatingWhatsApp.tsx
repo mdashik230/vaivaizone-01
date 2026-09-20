@@ -19,6 +19,7 @@ export default function FloatingWhatsApp() {
       href={`https://wa.me/${waNumber.startsWith('88') ? waNumber : '88' + waNumber}`}
       target="_blank"
       rel="noopener noreferrer"
+      aria-label="WhatsApp Support Chat"
       initial={{ scale: 0, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       whileHover={{ scale: 1.1 }}

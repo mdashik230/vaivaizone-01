@@ -3,7 +3,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, order
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { ALL_PRODUCTS, CATEGORY_DATA } from '../data';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
 import { sanitizeImageBase64 } from '../utils/imageCompressor';
 
 export interface TelegramSettings {
@@ -12,18 +12,12 @@ export interface TelegramSettings {
   isEnabled: boolean;
 }
 
-export type { SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings };
+export type { SteadfastSettings, UddoktaPaySettings };
 
-export const DEFAULT_WELCOME_POPUP: WelcomePopupSettings = {
-  isEnabled: true,
-  title: "আমাদের শপে আপনাকে স্বাগতম! 🎉",
-  message: "সেরা গ্যাজেট ও ফ্যাশন আইটেমে পাচ্ছেন আকর্ষণীয় ক্যাশব্যাক ও দ্রুততম হোম ডেলিভারি সুবিধা। এখনই আপনার পছন্দের পণ্যটি অর্ডার করুন!",
-  badgeText: "স্পেশাল অফার",
-  imageUrl: "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&q=80&w=800",
-  buttonText: "অর্ডার করুন / শপ দেখুন",
-  buttonLink: "/products",
-  showOncePerSession: true
-};
+export const DEFAULT_SLIDERS: Slider[] = [
+  { id: "1", image: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=1200", title: "New Season Style" },
+  { id: "2", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=1200", title: "Smart Gadgets Edition" }
+];
 
 export interface ContactInfo {
   phone: string;
@@ -68,14 +62,13 @@ interface AdminContextType {
   shippingSettings: ShippingSettings;
   scrollingMessage: string;
   contactInfo: ContactInfo;
-  welcomePopupSettings: WelcomePopupSettings;
+  isConfigsLoaded: boolean;
   setScrollingMessage: (msg: string) => void;
   setContactInfo: (info: ContactInfo) => void;
   setShippingSettings: (settings: ShippingSettings) => void;
   setTelegramSettings: (settings: TelegramSettings) => void;
   setSteadfastSettings: (settings: SteadfastSettings) => Promise<void>;
   setUddoktaPaySettings: (settings: UddoktaPaySettings) => Promise<void>;
-  setWelcomePopupSettings: (settings: WelcomePopupSettings) => Promise<void>;
   addSlider: (slider: Slider) => void;
   removeSlider: (id: string) => void;
   updateSlider: (id: string, data: Partial<Slider>) => void;
@@ -102,20 +95,77 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isAdminRef.current = isAdmin;
   }, [isAdmin]);
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Record<string, Category>>({});
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [sliders, setSliders] = useState<Slider[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [scrollingMessage, setScrollingMessageState] = useState("");
-  const [contactInfo, setContactInfoState] = useState<ContactInfo>({
-    phone: "", email: "", supportLink: "", whatsappNumber: "", telegramLink: "",
-    facebookPageLink: "", instagramLink: "", youtubeLink: "", tiktokLink: "",
-    paymentBkash: "", paymentNagad: "", paymentRocket: "", address: "", name: "",
-    isAppLocked: false
+  const [products, setProducts] = useState<Product[]>(() => {
+    try {
+      const cached = localStorage.getItem("app_products");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ALL_PRODUCTS;
   });
-  const [shippingSettings, setShippingSettingsState] = useState<ShippingSettings>({
-    freeDeliveryThreshold: 2000, defaultFee: 60, insideDhakaFee: 60, outsideDhakaFee: 120
+  const [categories, setCategories] = useState<Record<string, Category>>(() => {
+    try {
+      const cached = localStorage.getItem("app_categories");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && Object.keys(parsed).length > 0) return parsed;
+      }
+    } catch {}
+    return CATEGORY_DATA;
+  });
+  const [offers, setOffers] = useState<Offer[]>(() => {
+    try {
+      const cached = localStorage.getItem("app_offers");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+  const [sliders, setSliders] = useState<Slider[]>(() => {
+    try {
+      const cached = localStorage.getItem("app_sliders");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_SLIDERS;
+  });
+  const [areas, setAreas] = useState<Area[]>(() => {
+    try {
+      const cached = localStorage.getItem("app_areas");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [{ id: "1", name: "ঢাকা সিটি (Dhaka City)", charge: 60 }];
+  });
+  const [scrollingMessage, setScrollingMessageState] = useState(() => {
+    try {
+      return localStorage.getItem("app_scrolling_msg") || "আমাদের শপে আপনাকে স্বাগতম!";
+    } catch {
+      return "আমাদের শপে আপনাকে স্বাগতম!";
+    }
+  });
+  const [contactInfo, setContactInfoState] = useState<ContactInfo>(() => {
+    try {
+      const cached = localStorage.getItem("app_contact_info");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return {
+      phone: "+৮৮০১৭১১-২২৩৩৪৪", email: "support@shop.com", supportLink: "", whatsappNumber: "", telegramLink: "",
+      facebookPageLink: "", instagramLink: "", youtubeLink: "", tiktokLink: "",
+      paymentBkash: "", paymentNagad: "", paymentRocket: "", address: "", name: "Vai Vai Zone",
+      isAppLocked: false
+    };
+  });
+  const [shippingSettings, setShippingSettingsState] = useState<ShippingSettings>(() => {
+    try {
+      const cached = localStorage.getItem("app_shipping_settings");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return {
+      freeDeliveryThreshold: 2000, defaultFee: 60, insideDhakaFee: 60, outsideDhakaFee: 120
+    };
   });
   const [telegramSettings, setTelegramSettingsState] = useState<TelegramSettings>({
     botToken: "", chatId: "", isEnabled: false
@@ -123,7 +173,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [steadfastSettings, setSteadfastSettingsState] = useState<SteadfastSettings>({
     apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care"
   });
-  const [welcomePopupSettings, setWelcomePopupSettingsState] = useState<WelcomePopupSettings>(DEFAULT_WELCOME_POPUP);
+  const [isConfigsLoaded, setIsConfigsLoaded] = useState<boolean>(() => {
+    try {
+      return Boolean(localStorage.getItem("app_products"));
+    } catch {
+      return false;
+    }
+  });
   const [uddoktaPaySettings, setUddoktaPaySettingsState] = useState<UddoktaPaySettings>(() => {
     try {
       const cached = localStorage.getItem("uddoktaPaySettings");
@@ -134,23 +190,23 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   });
 
-  // Fetch data from Firestore
+  // Fetch data from Firestore immediately on mount for fast storefront render
   useEffect(() => {
-    if (loading) return;
-
     const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
       if (snapshot.empty && isAdminRef.current) {
         // Initial seed if empty and user is admin
         ALL_PRODUCTS.forEach(p => setDoc(doc(db, "products", String(p.id)), p));
-      } else {
-        setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
+      } else if (!snapshot.empty) {
+        const prods = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
+        setProducts(prods);
+        try { localStorage.setItem("app_products", JSON.stringify(prods)); } catch {}
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, "products"));
 
     const unsubCategories = onSnapshot(collection(db, "categories"), (snapshot) => {
       if (snapshot.empty && isAdminRef.current) {
         Object.entries(CATEGORY_DATA).forEach(([id, cat]) => setDoc(doc(db, "categories", id), { ...cat, id }));
-      } else {
+      } else if (!snapshot.empty) {
         const cats: Record<string, Category> = {};
         snapshot.docs.forEach(doc => {
           const data = doc.data() as any;
@@ -160,22 +216,31 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           } as Category;
         });
         setCategories(cats);
+        try { localStorage.setItem("app_categories", JSON.stringify(cats)); } catch {}
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, "categories"));
 
     const unsubConfigs = onSnapshot(doc(db, "configs", "main"), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data.scrollingMessage) setScrollingMessageState(data.scrollingMessage);
-        if (data.contactInfo) setContactInfoState(data.contactInfo);
-        if (data.shippingSettings) setShippingSettingsState(data.shippingSettings);
+        if (data.scrollingMessage) {
+          setScrollingMessageState(data.scrollingMessage);
+          try { localStorage.setItem("app_scrolling_msg", data.scrollingMessage); } catch {}
+        }
+        if (data.contactInfo) {
+          setContactInfoState(data.contactInfo);
+          try { localStorage.setItem("app_contact_info", JSON.stringify(data.contactInfo)); } catch {}
+        }
+        if (data.shippingSettings) {
+          setShippingSettingsState(data.shippingSettings);
+          try { localStorage.setItem("app_shipping_settings", JSON.stringify(data.shippingSettings)); } catch {}
+        }
         if (data.telegramSettings) setTelegramSettingsState(data.telegramSettings);
         if (data.steadfastSettings) setSteadfastSettingsState(data.steadfastSettings);
         if (data.uddoktaPaySettings) {
           const loadedPay: UddoktaPaySettings = {
             apiKey: data.uddoktaPaySettings.apiKey || "",
             apiUrl: data.uddoktaPaySettings.apiUrl || "https://sandbox.uddoktapay.com",
-            // If apiKey is present, activate by default unless explicitly disabled
             isEnabled: data.uddoktaPaySettings.isEnabled !== undefined 
               ? data.uddoktaPaySettings.isEnabled 
               : Boolean(data.uddoktaPaySettings.apiKey),
@@ -187,14 +252,15 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             localStorage.setItem("uddoktaPaySettings", JSON.stringify(loadedPay));
           } catch {}
         }
-        if (data.sliders) setSliders(data.sliders);
-        if (data.areas) setAreas(data.areas);
-        if (data.welcomePopupSettings) {
-          setWelcomePopupSettingsState({
-            ...DEFAULT_WELCOME_POPUP,
-            ...data.welcomePopupSettings
-          });
+        if (data.sliders && Array.isArray(data.sliders) && data.sliders.length > 0) {
+          setSliders(data.sliders);
+          try { localStorage.setItem("app_sliders", JSON.stringify(data.sliders)); } catch {}
         }
+        if (data.areas && Array.isArray(data.areas)) {
+          setAreas(data.areas);
+          try { localStorage.setItem("app_areas", JSON.stringify(data.areas)); } catch {}
+        }
+        setIsConfigsLoaded(true);
       } else if (isAdminRef.current) {
         // Seed default config only if admin
         setDoc(doc(db, "configs", "main"), {
@@ -209,7 +275,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           telegramSettings: { botToken: "", chatId: "", isEnabled: false },
           steadfastSettings: { apiKey: "", secretKey: "", isEnabled: false, autoBooking: false, defaultNote: "Handle with Care" },
           uddoktaPaySettings: { apiKey: "", apiUrl: "https://sandbox.uddoktapay.com", isEnabled: false, isSandbox: true },
-          welcomePopupSettings: DEFAULT_WELCOME_POPUP,
           sliders: [
             { id: "1", image: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=1200", title: "New Season Style" },
             { id: "2", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=1200", title: "Smart Gadgets Edition" }
@@ -218,11 +283,14 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             { id: "1", name: "ঢাকা সিটি (Dhaka City)", charge: 60 }
           ]
         });
+        setIsConfigsLoaded(true);
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, "configs/main"));
 
     const unsubOffers = onSnapshot(collection(db, "offers"), (snapshot) => {
-      setOffers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Offer)));
+      const off = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Offer));
+      setOffers(off);
+      try { localStorage.setItem("app_offers", JSON.stringify(off)); } catch {}
     }, (error) => handleFirestoreError(error, OperationType.GET, "offers"));
 
     return () => {
@@ -231,7 +299,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       unsubConfigs();
       unsubOffers();
     };
-  }, [loading]);
+  }, []);
 
   const updateConfig = (update: any) => {
     return setDoc(doc(db, "configs", "main"), update, { merge: true });
@@ -248,15 +316,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       localStorage.setItem("uddoktaPaySettings", JSON.stringify(settings));
     } catch {}
     await updateConfig({ uddoktaPaySettings: settings });
-  };
-
-  const setWelcomePopupSettings = async (settings: WelcomePopupSettings) => {
-    const clean = { ...settings };
-    if (clean.imageUrl) {
-      clean.imageUrl = await sanitizeImageBase64(clean.imageUrl, { maxWidth: 800, maxHeight: 800, quality: 0.8 });
-    }
-    setWelcomePopupSettingsState(clean);
-    await updateConfig({ welcomePopupSettings: clean });
   };
 
   const sanitizeCategoryData = async (cat: Partial<Category>): Promise<Partial<Category>> => {
@@ -352,8 +411,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   return (
     <AdminContext.Provider value={{
-      products, categories, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, welcomePopupSettings, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
-      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings, setWelcomePopupSettings,
+      products, categories, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, isConfigsLoaded, sliders, scrollingMessage, contactInfo, areas, shippingSettings,
+      setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider, setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings,
       addProduct, updateProduct, removeProduct,
       addCategory, updateCategory, removeCategory,
       addOffer, updateOffer, removeOffer,

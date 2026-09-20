@@ -9,6 +9,8 @@ export interface OrderItem {
   price: number;
   quantity: number;
   image: string;
+  selectedColor?: string;
+  selectedSize?: string;
 }
 
 export interface Order {

@@ -250,11 +250,24 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-            'motion': ['motion/react'],
-            'icons': ['lucide-react'],
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('jspdf') || id.includes('html2canvas') || id.includes('canvg') || id.includes('dompurify')) {
+                return 'pdf-generator';
+              }
+              if (id.includes('firebase')) {
+                return 'firebase';
+              }
+              if (id.includes('react') || id.includes('scheduler')) {
+                return 'vendor-react';
+              }
+              if (id.includes('motion')) {
+                return 'motion';
+              }
+              if (id.includes('lucide-react')) {
+                return 'icons';
+              }
+            }
           },
         },
       },

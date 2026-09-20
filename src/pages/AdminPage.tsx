@@ -1,14 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import { 
   LayoutDashboard, ShoppingBag, List, Image as ImageIcon, 
   Settings, MessageSquare, Phone, Plus, Trash2, Edit2, 
   Save, X, ChevronRight, ChevronDown, Package, DollarSign, Users,
   Globe, Mail, MapPin, CreditCard, Camera, Menu, Lock,
   Shirt, ShoppingBasket, ImagePlus, Truck, Printer, Store,
-  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, Facebook, RefreshCw, Search, Calculator, AlertCircle, BellRing, Sparkles
+  Eye, EyeOff, Clock, Send, Gift, FileText, Download, Check, Ban, ExternalLink, Copy, Calendar, Youtube, Share2, Instagram, Facebook, RefreshCw, Search, Calculator, AlertCircle, Sparkles
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, query, orderBy, doc, updateDoc } from 'firebase/firestore';
@@ -18,7 +16,7 @@ import { sendTelegramNotification } from '../utils/telegram';
 import { useOrders, Order } from '../context/OrderContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAuth } from '../context/AuthContext';
-import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings, WelcomePopupSettings } from '../types';
+import { Product, Category, Offer, Subcategory, Slider, SteadfastSettings, UddoktaPaySettings } from '../types';
 import { 
   createSteadfastOrder, 
   getSteadfastBalance, 
@@ -36,7 +34,7 @@ import { compressImageFile } from '../utils/imageCompressor';
 import PageTransition from "../components/PageTransition";
 import { LogOut } from 'lucide-react';
 
-type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'popup' | 'messages' | 'telegram' | 'steadfast' | 'payment-gateway' | 'users' | 'social-links';
+type AdminTab = 'dashboard' | 'products' | 'categories' | 'sub-categories' | 'sliders' | 'orders' | 'appearance' | 'offers' | 'messages' | 'telegram' | 'steadfast' | 'payment-gateway' | 'users' | 'social-links';
 
 const parseSafePrice = (price: any): number => {
   if (typeof price === 'number') return isNaN(price) ? 0 : Math.max(0, price);
@@ -95,12 +93,12 @@ export default function AdminPage() {
   }, [isAdmin, user?.uid]);
   
   const { 
-    products, categories, sliders, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, welcomePopupSettings, scrollingMessage, contactInfo, shippingSettings,
+    products, categories, sliders, offers, telegramSettings, steadfastSettings, uddoktaPaySettings, scrollingMessage, contactInfo, shippingSettings,
     setScrollingMessage, setContactInfo, addSlider, removeSlider, updateSlider,
     addProduct, updateProduct, removeProduct, 
     addCategory, updateCategory, removeCategory,
     addOffer, updateOffer, removeOffer,
-    setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings, setWelcomePopupSettings
+    setShippingSettings, setTelegramSettings, setSteadfastSettings, setUddoktaPaySettings
   } = useAdmin();
   const { orders, updateOrderStatus, updateOrder } = useOrders();
   const { language } = useSettings();
@@ -116,15 +114,13 @@ export default function AdminPage() {
   const [editingSubcategory, setEditingSubcategory] = useState<{sub: Partial<Subcategory>, parentId: string} | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
-  const [invoiceCopyMode, setInvoiceCopyMode] = useState<'dual' | 'single'>('dual');
+  const [invoiceCopyMode, setInvoiceCopyMode] = useState<'dual' | 'single'>('single');
   const [isDownloading, setIsDownloading] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
 
   const [localTelegram, setLocalTelegram] = useState<TelegramSettings | null>(null);
   const [localSteadfast, setLocalSteadfast] = useState<SteadfastSettings | null>(null);
   const [localUddoktaPay, setLocalUddoktaPay] = useState<UddoktaPaySettings | null>(null);
-  const [localWelcomePopup, setLocalWelcomePopup] = useState<WelcomePopupSettings | null>(null);
-  const [isSavingWelcomePopup, setIsSavingWelcomePopup] = useState(false);
   const [localContactInfo, setLocalContactInfo] = useState<ContactInfo | null>(null);
   const [localShippingSettings, setLocalShippingSettings] = useState<ShippingSettings | null>(null);
   const [localScrollingMessage, setLocalScrollingMessage] = useState<string>('');
@@ -192,8 +188,7 @@ export default function AdminPage() {
     if (contactInfo && !localContactInfo) setLocalContactInfo(contactInfo);
     if (shippingSettings && !localShippingSettings) setLocalShippingSettings(shippingSettings);
     if (scrollingMessage && !localScrollingMessage) setLocalScrollingMessage(scrollingMessage);
-    if (welcomePopupSettings && !localWelcomePopup) setLocalWelcomePopup(welcomePopupSettings);
-  }, [telegramSettings, steadfastSettings, uddoktaPaySettings, contactInfo, shippingSettings, scrollingMessage, welcomePopupSettings]);
+  }, [telegramSettings, steadfastSettings, uddoktaPaySettings, contactInfo, shippingSettings, scrollingMessage]);
 
   // Auto-fetch Steadfast balance when visiting Steadfast tab if credentials exist
   useEffect(() => {
@@ -495,45 +490,42 @@ export default function AdminPage() {
 
         let pdfSuccess = false;
 
-        // Strategy 1: html2canvas with complete Bengali font inclusion & CSS isolation from oklch
+        // Dynamically import html2canvas and jsPDF on demand
+        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+          import('html2canvas'),
+          import('jspdf')
+        ]);
+
+        // Strategy 1: html2canvas with complete Bengali font inclusion & pure inline styling
         try {
           const canvas = await html2canvas(element, {
-             scale: 2,
+             scale: 2.5,
              useCORS: true,
              logging: false,
              backgroundColor: '#ffffff',
              onclone: (clonedDoc) => {
-                // Remove all stylesheets with oklch / color-mix to avoid parser crash in production, but keep Google Fonts
-                clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(l => {
-                  const href = l.getAttribute('href') || '';
-                  if (!href.includes('fonts.googleapis.com')) {
-                    l.remove();
-                  }
-                });
+                // Remove stylesheets with oklch / color-mix to avoid parser crash in production
                 clonedDoc.querySelectorAll('style').forEach(s => {
                   if (s.textContent && (s.textContent.includes('oklch') || s.textContent.includes('color-mix'))) {
                     s.remove();
                   }
                 });
 
-                // Inject a clean, modern, pure-standard stylesheet with Bengali font
+                // Inject a clean stylesheet ensuring font family and canvas sizing
                 const cleanStyle = clonedDoc.createElement('style');
                 cleanStyle.textContent = `
-                  @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap');
+                  @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700;800&display=swap');
                   * { 
                     box-sizing: border-box !important; 
-                    margin: 0; 
-                    padding: 0; 
                     font-family: 'Hind Siliguri', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; 
                     -webkit-font-smoothing: antialiased;
                   }
-                  body { background: #ffffff !important; color: #111827 !important; }
+                  body { background: #ffffff !important; }
                   #invoice-print-container { 
-                    width: 720px !important; 
+                    width: 740px !important; 
                     background: #ffffff !important; 
-                    color: #111827 !important; 
-                    padding: 10px !important;
                     margin: 0 auto !important;
+                    padding: 0 !important;
                     display: block !important;
                     visibility: visible !important;
                     opacity: 1 !important;
@@ -542,61 +534,9 @@ export default function AdminPage() {
                   .invoice-slip {
                     width: 100% !important;
                     background: #ffffff !important;
-                    border: 1px solid #e5e7eb !important;
-                    border-radius: 6px !important;
-                    padding: 10px 14px !important;
-                    margin-bottom: 4px !important;
-                    box-sizing: border-box !important;
+                    display: block !important;
+                    visibility: visible !important;
                   }
-                  .flex { display: flex !important; }
-                  .justify-between { justify-content: space-between !important; }
-                  .justify-end { justify-content: flex-end !important; }
-                  .justify-center { justify-content: center !important; }
-                  .items-start { align-items: flex-start !important; }
-                  .items-center { align-items: center !important; }
-                  .grid { display: grid !important; }
-                  .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
-                  .gap-2 { gap: 8px !important; }
-                  .gap-3 { gap: 12px !important; }
-                  .gap-4 { gap: 16px !important; }
-                  .border-b { border-bottom: 1px solid #e5e7eb !important; }
-                  .border-t { border-top: 1px solid #e5e7eb !important; }
-                  .border-t-2 { border-top: 2px dashed #d1d5db !important; }
-                  .pb-2 { padding-bottom: 8px !important; }
-                  .pt-2 { padding-top: 8px !important; }
-                  .text-left { text-align: left !important; }
-                  .text-right { text-align: right !important; }
-                  .text-center { text-align: center !important; }
-                  .font-bold { font-weight: 700 !important; }
-                  .font-black { font-weight: 900 !important; }
-                  .font-medium { font-weight: 500 !important; }
-                  .font-semibold { font-weight: 600 !important; }
-                  .text-primary { color: #ff4e00 !important; }
-                  .text-neutral-900 { color: #111827 !important; }
-                  .text-neutral-800 { color: #1f2937 !important; }
-                  .text-neutral-700 { color: #374151 !important; }
-                  .text-neutral-600 { color: #4b5563 !important; }
-                  .text-neutral-500 { color: #6b7280 !important; }
-                  .text-neutral-400 { color: #9ca3af !important; }
-                  .text-green-700 { color: #15803d !important; }
-                  .text-orange-700 { color: #c2410c !important; }
-                  .text-amber-800 { color: #92400e !important; }
-                  .text-amber-600 { color: #d97706 !important; }
-                  .text-blue-700 { color: #1d4ed8 !important; }
-                  .bg-neutral-50 { background-color: #f9fafb !important; }
-                  .bg-neutral-100 { background-color: #f3f4f6 !important; }
-                  .bg-green-100 { background-color: #dcfce7 !important; }
-                  .bg-orange-100 { background-color: #ffedd5 !important; }
-                  .bg-amber-50 { background-color: #fffbeb !important; }
-                  .bg-blue-50 { background-color: #eff6ff !important; }
-                  .border-amber-200 { border-color: #fde68a !important; }
-                  .rounded { border-radius: 4px !important; }
-                  .rounded-md { border-radius: 6px !important; }
-                  .rounded-lg { border-radius: 8px !important; }
-                  .rounded-xl { border-radius: 12px !important; }
-                  table { width: 100% !important; border-collapse: collapse !important; }
-                  th { padding: 3px 5px !important; border-bottom: 1px solid #e5e7eb !important; font-size: 9.5px !important; color: #6b7280 !important; text-align: left !important; }
-                  td { padding: 3px 5px !important; border-bottom: 1px solid #f3f4f6 !important; font-size: 10.5px !important; }
                   .no-print { display: none !important; }
                 `;
                 clonedDoc.head.appendChild(cleanStyle);
@@ -611,27 +551,40 @@ export default function AdminPage() {
              }
           });
 
-          const imgData = canvas.toDataURL('image/jpeg', 0.98);
+          // PNG ensures 100% lossless colors without JPEG compression or color alteration
+          const imgData = canvas.toDataURL('image/png');
 
           if (invoiceCopyMode === 'dual') {
-            // Standard A4 PDF (210mm x 297mm) containing 2 slips with cut line
+            // Standard A4 PDF (210mm x 297mm) containing 2 slips (Customer + Merchant copies)
             const pdf = new jsPDF('p', 'mm', 'a4');
             const pdfWidth = 196;
             const pdfPageHeight = 297;
             const contentHeight = (canvas.height * pdfWidth) / canvas.width;
             
-            const yOffset = contentHeight < pdfPageHeight ? Math.max(5, (pdfPageHeight - contentHeight) / 2) : 5;
-            pdf.addImage(imgData, 'JPEG', 7, yOffset, pdfWidth, Math.min(contentHeight, pdfPageHeight - 10));
-            pdf.save(`Invoice-A4-2x-${selectedOrder.id.slice(-8)}.pdf`);
+            const yOffset = 5;
+            pdf.addImage(imgData, 'PNG', 7, yOffset, pdfWidth, Math.min(contentHeight, pdfPageHeight - 10));
+            pdf.save(`Invoice-A4-2x-${selectedOrder.id.slice(-8).toUpperCase()}.pdf`);
           } else {
-            // Single Slip: A5 Landscape format (210mm x 148mm) - exactly half A4!
-            const pdf = new jsPDF('l', 'mm', 'a5'); // 210 x 148 mm
+            // Half-A4 Mode on standard A4 page:
+            // Standard A4 page (210mm x 297mm). The invoice sits cleanly on the top half (~120mm tall).
+            // A crisp dashed cut line is drawn at 148.5mm.
+            // Using standard ASCII text for jsPDF to avoid font mojibake/garbled text.
+            const pdf = new jsPDF('p', 'mm', 'a4');
             const pdfWidth = 196;
-            const pdfHeight = 148;
             const contentHeight = (canvas.height * pdfWidth) / canvas.width;
-            const yOffset = contentHeight < pdfHeight ? Math.max(4, (pdfHeight - contentHeight) / 2) : 4;
-            pdf.addImage(imgData, 'JPEG', 7, yOffset, pdfWidth, Math.min(contentHeight, pdfHeight - 8));
-            pdf.save(`Invoice-${selectedOrder.id.slice(-8)}.pdf`);
+            
+            // Place invoice at top margin (6mm)
+            pdf.addImage(imgData, 'PNG', 7, 6, pdfWidth, Math.min(contentHeight, 138));
+            
+            // Draw clean dashed cutting line at exactly 148.5mm (half of A4)
+            pdf.setDrawColor(180, 180, 180);
+            pdf.setLineDashPattern([2, 2], 0);
+            pdf.line(7, 148.5, 203, 148.5);
+            pdf.setFontSize(7.5);
+            pdf.setTextColor(140, 140, 140);
+            pdf.text('------------------------------ CUT HERE (HALF A4) ------------------------------', 105, 147, { align: 'center' });
+            
+            pdf.save(`Invoice-${selectedOrder.id.slice(-8).toUpperCase()}.pdf`);
           }
 
           pdfSuccess = true;
@@ -2717,374 +2670,6 @@ export default function AdminPage() {
     );
   };
 
-  const renderWelcomePopup = () => {
-    const popup = localWelcomePopup || {
-      isEnabled: true,
-      title: "আমাদের শপে আপনাকে স্বাগতম! 🎉",
-      message: "সেরা গ্যাজেট ও ফ্যাশন আইটেমে পাচ্ছেন আকর্ষণীয় ক্যাশব্যাক ও দ্রুততম হোম ডেলিভারি সুবিধা। এখনই আপনার পছন্দের পণ্যটি অর্ডার করুন!",
-      badgeText: "স্পেশাল অফার",
-      imageUrl: "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&q=80&w=800",
-      buttonText: "অর্ডার করুন / শপ দেখুন",
-      buttonLink: "/products",
-      showOncePerSession: true
-    };
-
-    const handleSavePopup = async () => {
-      setIsSavingWelcomePopup(true);
-      try {
-        await setWelcomePopupSettings(popup);
-        showNotification(language === 'bn' ? 'ওয়েলকাম পপআপ সেটিংস সফলভাবে সংরক্ষিত হয়েছে!' : 'Welcome popup settings saved successfully!', 'success');
-      } catch (err) {
-        showNotification(language === 'bn' ? 'সেটিংস সংরক্ষণে ব্যর্থ হয়েছে' : 'Failed to save settings', 'error');
-      } finally {
-        setIsSavingWelcomePopup(false);
-      }
-    };
-
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      try {
-        const compressed = await compressImageFile(file, { maxWidth: 800, maxHeight: 800, quality: 0.8 });
-        setLocalWelcomePopup({ ...popup, imageUrl: compressed });
-        showNotification(language === 'bn' ? 'ছবি সফলভাবে লোড হয়েছে' : 'Image loaded successfully', 'success');
-      } catch (err) {
-        showNotification(language === 'bn' ? 'ছবি প্রসেস করতে ব্যর্থ হয়েছে' : 'Failed to process image', 'error');
-      }
-    };
-
-    const triggerPreview = () => {
-      window.dispatchEvent(new Event('open-welcome-popup-preview'));
-      showNotification(language === 'bn' ? 'লাইভ প্রিভিউ ওপেন করা হয়েছে!' : 'Live preview triggered!', 'success');
-    };
-
-    return (
-      <div className="space-y-6">
-        {/* Header Bar */}
-        <div className="bg-white dark:bg-neutral-900 p-6 sm:p-8 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <BellRing size={24} />
-            </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-xl sm:text-2xl font-black text-neutral-900 dark:text-white">
-                  {language === 'bn' ? 'ওয়েলকাম পপআপ মেসেজ' : 'Welcome Popup Message'}
-                </h2>
-                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
-                  popup.isEnabled 
-                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' 
-                    : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
-                }`}>
-                  {popup.isEnabled ? (language === 'bn' ? 'চালু আছে (Active)' : 'Active') : (language === 'bn' ? 'বন্ধ আছে (Off)' : 'Disabled')}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mt-1 max-w-xl">
-                {language === 'bn' 
-                  ? 'গ্রাহক যখন ওয়েবসাইটে প্রবেশ করবে তখন এই ওয়েলকাম মেসেজ বা বিশেষ অফারের পপআপ উইন্ডো প্রদর্শিত হবে। আপনি চাইলে এক ক্লিকে এটি অন/অফ করতে পারেন।'
-                  : 'Display a welcoming popup or special offer message when customers visit your storefront.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={triggerPreview}
-              className="px-4 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 rounded-2xl font-bold text-xs transition-colors flex items-center gap-2"
-              title="ওয়েবসাইটে পপআপটি কেমন দেখাবে তা পরীক্ষা করুন"
-            >
-              <Eye size={15} />
-              <span>{language === 'bn' ? 'লাইভ প্রিভিউ টেস্ট' : 'Test Preview'}</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={isSavingWelcomePopup}
-              onClick={handleSavePopup}
-              className="px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-2xl font-black text-xs transition-all shadow-lg shadow-primary/25 hover:shadow-primary/40 flex items-center gap-2 disabled:opacity-50 active:scale-95"
-            >
-              <Save size={15} className={isSavingWelcomePopup ? 'animate-spin' : ''} />
-              <span>{isSavingWelcomePopup ? (language === 'bn' ? 'সংরক্ষণ হচ্ছে...' : 'Saving...') : (language === 'bn' ? 'সেভ করুন' : 'Save Changes')}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Master ON/OFF Switch Card */}
-        <div className="bg-white dark:bg-neutral-900 p-6 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Sparkles size={18} className={popup.isEnabled ? 'text-primary' : 'text-neutral-400'} />
-              <h3 className="font-black text-base text-neutral-900 dark:text-white">
-                {language === 'bn' ? 'পপআপ অন / অফ স্ট্যাটাস' : 'Popup Toggle Status'}
-              </h3>
-            </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium">
-              {popup.isEnabled 
-                ? (language === 'bn' ? 'পপআপ বর্তমানে সক্রিয় রয়েছে। ইউজার সাইটে প্রবেশ করলেই এটি প্রদর্শিত হবে।' : 'Popup is enabled and will show to visitors.') 
-                : (language === 'bn' ? 'পপআপ বর্তমানে বন্ধ রয়েছে। গ্রাহকদের কোনো পপআপ দেখানো হবে না।' : 'Popup is currently disabled.')}
-            </p>
-          </div>
-
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input 
-              type="checkbox" 
-              checked={Boolean(popup.isEnabled)}
-              onChange={(e) => setLocalWelcomePopup({ ...popup, isEnabled: e.target.checked })}
-              className="sr-only peer"
-            />
-            <div className="w-14 h-7 bg-neutral-200 peer-focus:outline-none rounded-full peer dark:bg-neutral-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[4px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all dark:border-neutral-600 peer-checked:bg-primary"></div>
-          </label>
-        </div>
-
-        {/* Content Configuration & Live Preview Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Form Settings Column */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="bg-white dark:bg-neutral-900 p-6 sm:p-7 rounded-[2rem] border border-neutral-100 dark:border-neutral-800 space-y-5">
-              <h3 className="font-black text-sm uppercase tracking-wider text-neutral-400 flex items-center gap-2">
-                <Edit2 size={15} /> {language === 'bn' ? 'পপআপ কনটেন্ট ও ডিজাইন' : 'Popup Content & Design'}
-              </h3>
-
-              {/* Title */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  {language === 'bn' ? 'পপআপ শিরোনাম (Title)' : 'Popup Title'}
-                </label>
-                <input
-                  type="text"
-                  value={popup.title || ''}
-                  onChange={(e) => setLocalWelcomePopup({ ...popup, title: e.target.value })}
-                  placeholder="যেমন: আমাদের শপে আপনাকে স্বাগতম! 🎉"
-                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
-                />
-              </div>
-
-              {/* Badge Tag */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{language === 'bn' ? 'অফার ব্যাজ / ট্যাগ (Badge / Tag)' : 'Offer Badge / Tag'}</span>
-                  <span className="text-[10px] text-neutral-400 font-normal">ঐচ্ছিক (Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={popup.badgeText || ''}
-                  onChange={(e) => setLocalWelcomePopup({ ...popup, badgeText: e.target.value })}
-                  placeholder="যেমন: স্পেশাল অফার 🔥 বা ধামাকা ছাড়"
-                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
-                />
-              </div>
-
-              {/* Message */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  {language === 'bn' ? 'পপআপ মেসেজ / বিবরণ (Message)' : 'Popup Message'}
-                </label>
-                <textarea
-                  rows={3}
-                  value={popup.message || ''}
-                  onChange={(e) => setLocalWelcomePopup({ ...popup, message: e.target.value })}
-                  placeholder="আপনার কাঙ্ক্ষিত স্বাগতম বার্তা বা অফারের বিবরণ এখানে লিখুন..."
-                  className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-medium text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all resize-none"
-                />
-              </div>
-
-              {/* Banner Image */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center justify-between">
-                  <span>{language === 'bn' ? 'ব্যানার ইমেজ (Banner Image)' : 'Banner Image'}</span>
-                  <span className="text-[10px] text-neutral-400 font-normal">ঐচ্ছিক (Optional)</span>
-                </label>
-                
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="text"
-                    value={popup.imageUrl || ''}
-                    onChange={(e) => setLocalWelcomePopup({ ...popup, imageUrl: e.target.value })}
-                    placeholder="https://images.unsplash.com/... বা ছবি আপলোড করুন"
-                    className="flex-1 px-5 py-3 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-medium text-xs text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-
-                  <label className="px-4 py-3 rounded-2xl bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-bold text-xs cursor-pointer flex items-center justify-center gap-2 transition-colors shrink-0">
-                    <Camera size={15} />
-                    <span>{language === 'bn' ? 'ছবি আপলোড' : 'Upload'}</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      onChange={handleImageUpload} 
-                      className="hidden" 
-                    />
-                  </label>
-
-                  {popup.imageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setLocalWelcomePopup({ ...popup, imageUrl: '' })}
-                      className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-2xl transition-colors shrink-0"
-                      title="ছবি মুছে ফেলুন"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Action Button Text & Link */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    {language === 'bn' ? 'বাটন টেক্সট (Button Text)' : 'Button Text'}
-                  </label>
-                  <input
-                    type="text"
-                    value={popup.buttonText || ''}
-                    onChange={(e) => setLocalWelcomePopup({ ...popup, buttonText: e.target.value })}
-                    placeholder="অর্ডার করুন / শপ দেখুন"
-                    className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    {language === 'bn' ? 'বাটন লিংক (Button Link)' : 'Button Link / Route'}
-                  </label>
-                  <input
-                    type="text"
-                    value={popup.buttonLink || ''}
-                    onChange={(e) => setLocalWelcomePopup({ ...popup, buttonLink: e.target.value })}
-                    placeholder="/products"
-                    className="w-full px-5 py-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold text-sm text-neutral-900 dark:text-white focus:ring-2 focus:ring-primary/20 transition-all"
-                  />
-                </div>
-              </div>
-
-              {/* Quick Link Presets */}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-[11px] font-bold text-neutral-400">{language === 'bn' ? 'কুইক লিংক:' : 'Quick Presets:'}</span>
-                {[
-                  { label: 'সব পণ্য (/products)', link: '/products' },
-                  { label: 'ক্যাটাগরি (/categories)', link: '/categories' },
-                  { label: 'কার্ট (/cart)', link: '/cart' },
-                  { label: 'অর্ডার ট্র্যাকিং (/order-tracking)', link: '/order-tracking' }
-                ].map(p => (
-                  <button
-                    key={p.link}
-                    type="button"
-                    onClick={() => setLocalWelcomePopup({ ...popup, buttonLink: p.link })}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                      popup.buttonLink === p.link 
-                        ? 'bg-primary text-white' 
-                        : 'bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-600 dark:text-neutral-300'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Session Frequency Toggle */}
-              <div className="pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                    {language === 'bn' ? 'একই সেশনে একবার দেখাবে (Show Once Per Session)' : 'Show Once Per Session'}
-                  </h4>
-                  <p className="text-[11px] text-neutral-400 font-normal">
-                    {language === 'bn' 
-                      ? 'অন থাকলে গ্রাহক ব্রাউজার বন্ধ না করা পর্যন্ত প্রতিবার পেজ রিলোডে বারবার বিরক্ত হবে না।'
-                      : 'Prevents showing repeatedly during the same visitor browsing session.'}
-                  </p>
-                </div>
-                <input 
-                  type="checkbox" 
-                  checked={popup.showOncePerSession ?? true}
-                  onChange={(e) => setLocalWelcomePopup({ ...popup, showOncePerSession: e.target.checked })}
-                  className="w-5 h-5 rounded-lg text-primary focus:ring-primary/20 accent-primary cursor-pointer"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Real-Time Live Preview Column */}
-          <div className="lg:col-span-5 space-y-4">
-            <div className="sticky top-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-black text-sm uppercase tracking-wider text-neutral-400 flex items-center gap-2">
-                  <Eye size={15} /> {language === 'bn' ? 'লাইভ প্রিভিউ (Real-Time Preview)' : 'Live Preview'}
-                </h3>
-                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md">
-                  লাইভ ভিজ্যুয়াল
-                </span>
-              </div>
-
-              {/* Mock Window Frame */}
-              <div className="bg-neutral-900 p-4 sm:p-5 rounded-[2.5rem] shadow-xl border border-neutral-800">
-                <div className="flex items-center gap-1.5 mb-3 px-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></div>
-                  <div className="w-2.5 h-2.5 rounded-full bg-green-500/80"></div>
-                  <span className="text-[10px] text-neutral-500 font-mono ml-2">storefront/welcome-modal</span>
-                </div>
-
-                {/* Popup Card Preview */}
-                <div className="bg-white dark:bg-neutral-900 rounded-3xl overflow-hidden border border-neutral-100 dark:border-neutral-800 shadow-2xl relative">
-                  {/* Mock Close Button */}
-                  <div className="absolute top-3 right-3 z-10 w-7 h-7 rounded-full bg-black/40 text-white flex items-center justify-center">
-                    <X size={14} />
-                  </div>
-
-                  {/* Banner Image Preview */}
-                  {popup.imageUrl ? (
-                    <div className="relative w-full h-36 bg-neutral-100 dark:bg-neutral-800 overflow-hidden">
-                      <img 
-                        src={popup.imageUrl} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover" 
-                        onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-                      {popup.badgeText && (
-                        <div className="absolute bottom-2.5 left-3 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-black shadow-md">
-                          <Sparkles size={10} />
-                          <span>{popup.badgeText}</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : popup.badgeText ? (
-                    <div className="pt-4 text-center">
-                      <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-black">
-                        <Gift size={12} /> {popup.badgeText}
-                      </span>
-                    </div>
-                  ) : null}
-
-                  {/* Body Preview */}
-                  <div className="p-5 text-center space-y-3">
-                    <h4 className="font-black text-lg text-neutral-900 dark:text-white leading-snug">
-                      {popup.title || 'আমাদের শপে আপনাকে স্বাগতম!'}
-                    </h4>
-                    <p className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-                      {popup.message || 'সেরা গ্যাজেট ও ফ্যাশন আইটেম সেরা মূল্যে পেতে আজই অর্ডার করুন।'}
-                    </p>
-
-                    <div className="pt-2 flex gap-2">
-                      <div className="flex-1 py-2.5 px-4 rounded-xl bg-primary text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-primary/25">
-                        <ShoppingBag size={14} />
-                        <span>{popup.buttonText || 'অর্ডার করুন'}</span>
-                      </div>
-                      <div className="py-2.5 px-3 rounded-xl bg-neutral-100 dark:bg-neutral-800 text-neutral-500 font-bold text-[11px] flex items-center justify-center">
-                        পরে দেখবো
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const tabs = [
     { id: 'dashboard', label: 'ড্যাশবোর্ড', icon: <LayoutDashboard size={18} /> },
     { id: 'products', label: 'প্রডাক্টস', icon: <ShoppingBag size={18} /> },
@@ -3094,7 +2679,6 @@ export default function AdminPage() {
     { id: 'sliders', label: 'স্লাইডার', icon: <ImageIcon size={18} /> },
     { id: 'orders', label: 'অর্ডার্স', icon: <Package size={18} /> },
     { id: 'offers', label: 'অফার', icon: <Gift size={18} /> },
-    { id: 'popup', label: 'ওয়েলকাম পপআপ', icon: <BellRing size={18} /> },
     { id: 'messages', label: 'নোটিশ', icon: <MessageSquare size={18} /> },
     { id: 'telegram', label: 'টেলিগ্রাম', icon: <Send size={18} /> },
     { id: 'steadfast', label: 'স্টেডফাস্ট কুরিয়ার', icon: <Truck size={18} /> },
@@ -3203,7 +2787,6 @@ export default function AdminPage() {
               {activeTab === 'sliders' && renderSliders()}
               {activeTab === 'orders' && renderOrders()}
               {activeTab === 'offers' && renderOffers()}
-              {activeTab === 'popup' && renderWelcomePopup()}
               {activeTab === 'social-links' && renderSocialLinks()}
               {activeTab === 'messages' && renderMessages()}
               {activeTab === 'telegram' && renderTelegram()}
@@ -3239,19 +2822,19 @@ export default function AdminPage() {
                         <div className="flex bg-neutral-100 dark:bg-neutral-800 p-0.5 rounded-lg text-[10px] font-bold">
                           <button
                             type="button"
-                            onClick={() => setInvoiceCopyMode('dual')}
-                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'dual' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
-                            title="A4 পেজে ২টি ইনভয়েস (কাটার দাগ সহ)"
+                            onClick={() => setInvoiceCopyMode('single')}
+                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'single' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                            title="অর্ধেক A4 পেজে ১টি ক্লিন ইনভয়েস স্লিপ"
                           >
-                            A4 (২টি ইনভয়েস)
+                            অর্ধেক A4 (১টি স্লিপ)
                           </button>
                           <button
                             type="button"
-                            onClick={() => setInvoiceCopyMode('single')}
-                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'single' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
-                            title="১টি সিঙ্গেল ইনভয়েস স্লিপ"
+                            onClick={() => setInvoiceCopyMode('dual')}
+                            className={`px-2.5 py-1 rounded-md transition-all ${invoiceCopyMode === 'dual' ? 'bg-white dark:bg-neutral-700 text-primary shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                            title="A4 পেজে ২টি ইনভয়েস (গ্রাহক ও মার্চেন্ট কপি)"
                           >
-                            ১টি ইনভয়েস
+                            ফুল A4 (২টি স্লিপ)
                           </button>
                         </div>
 
@@ -3484,22 +3067,22 @@ export default function AdminPage() {
                         <div className="pt-6 border-t border-neutral-200 dark:border-neutral-800 space-y-4">
                           <div className="flex items-center justify-between gap-3 bg-neutral-100 dark:bg-neutral-800 p-2 rounded-2xl">
                             <span className="text-xs font-bold text-neutral-600 dark:text-neutral-300 pl-2">
-                              {invoiceCopyMode === 'dual' ? 'A4 পেজে ২টি ইনভয়েস মোড সক্রিয়' : '১টি ইনভয়েস মোড সক্রিয়'}
+                              {invoiceCopyMode === 'single' ? 'অর্ধেক A4 (১টি ইনভয়েস) মোড সক্রিয়' : 'ফুল A4 (২টি ইনভয়েস) মোড সক্রিয়'}
                             </span>
                             <div className="flex bg-white dark:bg-neutral-700 p-0.5 rounded-xl text-[10px] font-bold">
-                              <button
-                                type="button"
-                                onClick={() => setInvoiceCopyMode('dual')}
-                                className={`px-3 py-1 rounded-lg transition-all ${invoiceCopyMode === 'dual' ? 'bg-primary text-white shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
-                              >
-                                ২টি ইনভয়েস (A4)
-                              </button>
                               <button
                                 type="button"
                                 onClick={() => setInvoiceCopyMode('single')}
                                 className={`px-3 py-1 rounded-lg transition-all ${invoiceCopyMode === 'single' ? 'bg-primary text-white shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
                               >
-                                ১টি ইনভয়েস
+                                অর্ধেক A4 (১টি স্লিপ)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setInvoiceCopyMode('dual')}
+                                className={`px-3 py-1 rounded-lg transition-all ${invoiceCopyMode === 'dual' ? 'bg-primary text-white shadow-xs font-black' : 'text-neutral-500 hover:text-neutral-700'}`}
+                              >
+                                ফুল A4 (২টি স্লিপ)
                               </button>
                             </div>
                           </div>
@@ -3550,119 +3133,235 @@ export default function AdminPage() {
                         const codFee = selectedOrder.serviceCharge || 0;
                         const grandTotal = subtotal + deliveryFee + codFee;
 
-                        const renderInvoiceSlip = (key: string | number) => {
+                        const renderInvoiceSlip = (key: string | number, copyLabel?: string) => {
+                          const isPaid = selectedOrder.paymentStatus === 'Approved';
+                          const orderNumber = selectedOrder.id.slice(-8).toUpperCase();
+                          const phone = selectedOrder.customerInfo?.phone || 'N/A';
+                          const name = selectedOrder.customerInfo?.name || 'Customer';
+                          const address = selectedOrder.customerInfo?.address || '';
+                          const area = selectedOrder.customerInfo?.area || '';
+                          const storePhone = contactInfo.phone || '01301879230';
+                          const storeAddress = contactInfo.address || 'ঢাকা, বাংলাদেশ';
+                          const storeName = contactInfo.name || 'Vai Vai Zone';
+
                           return (
                             <div 
                               key={key} 
-                              className="invoice-slip bg-white text-neutral-900 border border-neutral-200 rounded-xl p-3 space-y-2 font-sans text-left"
-                              style={{ fontFamily: "'Hind Siliguri', sans-serif" }}
+                              className="invoice-slip"
+                              style={{
+                                width: '100%',
+                                backgroundColor: '#ffffff',
+                                color: '#0f172a',
+                                border: '1.5px solid #0f172a',
+                                borderRadius: '8px',
+                                padding: '16px 20px',
+                                boxSizing: 'border-box',
+                                fontFamily: "'Hind Siliguri', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                                textAlign: 'left',
+                              }}
                             >
-                              {/* Header */}
-                              <div className="flex justify-between items-start border-b border-neutral-200 pb-1.5">
-                                <div className="space-y-0.5 text-left">
-                                  <h2 className="text-base font-black tracking-tight text-primary leading-tight">
-                                    {contactInfo.name || 'Vai Vai Zone'}
-                                  </h2>
-                                  <p className="text-[9px] text-neutral-500 font-medium italic">সততা ও বিশ্বাস এ আমরা অবিচল</p>
-                                  <div className="flex items-center gap-3 text-[9px] text-neutral-600 font-medium pt-0.5">
-                                    <span>📍 {contactInfo.address || 'Dhaka, Bangladesh'}</span>
-                                    <span>📞 {contactInfo.phone || '01301879230'}</span>
+                              {/* 1. Header: Store info + Invoice / Order details */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1.5px solid #0f172a', paddingBottom: '10px', marginBottom: '12px' }}>
+                                <div style={{ textAlign: 'left' }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                                    <h1 style={{ fontSize: '24px', fontWeight: 900, color: '#ff4e00', margin: 0, lineHeight: 1.1, letterSpacing: '-0.5px' }}>
+                                      {storeName}
+                                    </h1>
+                                    <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', fontWeight: 500 }}>
+                                      — সততা ও বিশ্বাসে আমরা অবিচল
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', color: '#334155', fontWeight: 500, marginTop: '4px', lineHeight: 1.4 }}>
+                                    <span>ঠিকানা: {storeAddress}</span>
+                                    <span style={{ margin: '0 8px', color: '#cbd5e1' }}>|</span>
+                                    <span>হটলাইন: <strong style={{ color: '#0f172a', fontWeight: 700 }}>{storePhone}</strong></span>
                                   </div>
                                 </div>
-                                <div className="text-right space-y-0.5">
-                                  <div className="inline-block px-2 py-0.5 bg-neutral-100 rounded text-[8.5px] font-black uppercase tracking-wider text-neutral-800">
-                                    INVOICE
-                                  </div>
-                                  <p className="text-xs font-black text-neutral-900 tracking-tight leading-none">
-                                    #{selectedOrder.id.slice(-8).toUpperCase()}
-                                  </p>
-                                  <p className="text-[9px] font-bold text-neutral-500">{formattedDate}</p>
 
-                                  {/* Steadfast Parcel ID */}
-                                  {(selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode) && (
-                                    <div className="mt-1 inline-flex flex-col items-end bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 text-right">
-                                      <span className="text-[7.5px] font-bold text-amber-800 uppercase tracking-tight">
-                                        📦 স্টেডফাস্ট পার্সেল আইডি
+                                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                                    {copyLabel && (
+                                      <span style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>
+                                        {copyLabel}
                                       </span>
-                                      <span className="font-mono text-[9.5px] font-black text-neutral-900 leading-tight">
-                                        #{selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode}
-                                      </span>
-                                      {selectedOrder.steadfastConsignmentId && selectedOrder.steadfastTrackingCode && (
-                                        <span className="font-mono text-[7.5px] text-amber-700">
-                                          TRK: {selectedOrder.steadfastTrackingCode}
-                                        </span>
-                                      )}
+                                    )}
+                                    <span style={{ backgroundColor: '#0f172a', color: '#ffffff', borderRadius: '4px', padding: '3px 10px', fontSize: '11px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                      ক্যাশ মেমো / INVOICE
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                                    অর্ডার নং: <span style={{ fontFamily: 'monospace', fontWeight: 900, color: '#0f172a' }}>#{orderNumber}</span>
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                                    তারিখ: <strong style={{ color: '#0f172a', fontWeight: 600 }}>{formattedDate}</strong>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Steadfast Courier Tracking Bar (if available) */}
+                              {(selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode) && (
+                                <div style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '6px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', marginBottom: '12px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ fontWeight: 700, color: '#334155' }}>কুরিয়ার: Steadfast Courier</span>
+                                    <span style={{ color: '#cbd5e1' }}>|</span>
+                                    <span>পার্সেল আইডি: <strong style={{ fontFamily: 'monospace', fontWeight: 900, color: '#0f172a' }}>#{selectedOrder.steadfastConsignmentId || selectedOrder.steadfastTrackingCode}</strong></span>
+                                  </div>
+                                  {selectedOrder.steadfastTrackingCode && (
+                                    <div>
+                                      ট্র্যাকিং কোড: <strong style={{ fontFamily: 'monospace', fontWeight: 900, color: '#ff4e00' }}>{selectedOrder.steadfastTrackingCode}</strong>
                                     </div>
                                   )}
                                 </div>
-                              </div>
+                              )}
 
-                              {/* Customer & Order / Payment Info */}
-                              <div className="grid grid-cols-2 gap-3 text-left">
-                                <div className="space-y-0.5">
-                                  <p className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">Bill To (ক্রেতার তথ্য)</p>
-                                  <p className="text-xs font-bold text-neutral-900 leading-tight">{selectedOrder.customerInfo?.name || 'Customer'}</p>
-                                  <p className="text-[10px] font-semibold text-neutral-700">📞 {selectedOrder.customerInfo?.phone || 'N/A'}</p>
-                                  <p className="text-[9px] text-neutral-600 leading-snug">
-                                    🏠 {selectedOrder.customerInfo?.address || ''}{selectedOrder.customerInfo?.area ? `, ${selectedOrder.customerInfo.area}` : ''}
-                                  </p>
+                              {/* 2. Customer Info & Payment Info (2 Cards) */}
+                              <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+                                {/* Customer / Delivery Address */}
+                                <div style={{ flex: 1, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', textAlign: 'left' }}>
+                                  <div style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', borderBottom: '1px solid #e2e8f0', paddingBottom: '3px', marginBottom: '6px' }}>
+                                    প্রাপক / ডেলিভারি ঠিকানা
+                                  </div>
+                                  <div style={{ fontSize: '14px', fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                                    {name}
+                                  </div>
+                                  <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#0f172a', marginTop: '3px' }}>
+                                    মোবাইল: <span style={{ fontFamily: 'monospace', fontSize: '13px' }}>{phone}</span>
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', color: '#334155', marginTop: '3px', lineHeight: 1.4 }}>
+                                    ঠিকানা: {address} {area && <strong style={{ color: '#0f172a' }}>({area})</strong>}
+                                  </div>
                                 </div>
-                                <div className="space-y-0.5 text-right">
-                                  <p className="text-[8px] font-bold uppercase tracking-wider text-neutral-400">Payment & Order</p>
-                                  <p className="text-[10px] font-bold text-neutral-800">
-                                    {selectedOrder.paymentMethod === 'Cash on Delivery' ? 'ক্যাশ অন ডেলিভারি (COD)' : selectedOrder.paymentMethod}
-                                  </p>
-                                  <div className="flex justify-end gap-1.5 items-center pt-0.5">
-                                    <span className={`inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${
-                                      selectedOrder.paymentStatus === 'Approved' ? 'bg-green-100 text-green-700' : 'bg-neutral-100 text-neutral-700'
-                                    }`}>
-                                      {selectedOrder.paymentStatus || 'PENDING'}
-                                    </span>
-                                    <span className="inline-block px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-blue-50 text-blue-700">
+
+                                {/* Payment & Status Info */}
+                                <div style={{ flex: 1, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', textAlign: 'left' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', borderBottom: '1px solid #e2e8f0', paddingBottom: '3px', marginBottom: '6px' }}>
+                                    <span>পেমেন্ট ও অর্ডার বিবরণ</span>
+                                    <span style={{ backgroundColor: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: '3px', fontWeight: 700, fontSize: '9.5px' }}>
                                       {selectedOrder.status}
                                     </span>
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', color: '#334155' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                      <span style={{ color: '#64748b' }}>পেমেন্ট মাধ্যম:</span>
+                                      <strong style={{ color: '#0f172a', fontWeight: 700 }}>
+                                        {selectedOrder.paymentMethod === 'Cash on Delivery' ? 'ক্যাশ অন ডেলিভারি (COD)' : selectedOrder.paymentMethod}
+                                      </strong>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                                      <span style={{ color: '#64748b' }}>পেমেন্ট স্ট্যাটাস:</span>
+                                      <span style={{
+                                        backgroundColor: isPaid ? '#dcfce7' : '#fef3c7',
+                                        color: isPaid ? '#15803d' : '#b45309',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '10px',
+                                        fontWeight: 800,
+                                        border: isPaid ? '1px solid #bbf7d0' : '1px solid #fde68a'
+                                      }}>
+                                        {isPaid ? 'পরিশোধিত (PAID)' : 'বকেয়া / কন্ডিশন'}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ color: '#64748b' }}>ডেলিভারি ধরন:</span>
+                                      <strong style={{ color: '#0f172a', fontWeight: 600 }}>
+                                        {area.includes('ঢাকা') ? 'হোম ডেলিভারি (ঢাকা)' : 'সারা বাংলাদেশ ডেলিভারি'}
+                                      </strong>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
 
-                              {/* Items Table */}
-                              <div>
-                                <table className="w-full text-left border-collapse">
+                              {/* 3. Products Table */}
+                              <div style={{ marginBottom: '12px' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #cbd5e1', textAlign: 'left' }}>
                                   <thead>
-                                    <tr className="border-b border-neutral-200 text-[8px] font-bold uppercase tracking-wider text-neutral-400">
-                                      <th className="py-1">বিবরণ (Item)</th>
-                                      <th className="py-1 text-center">পরিমাণ (Qty)</th>
-                                      <th className="py-1 text-right">দর (Price)</th>
-                                      <th className="py-1 text-right">মোট (Total)</th>
+                                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1.5px solid #cbd5e1', fontSize: '11px', color: '#1e293b' }}>
+                                      <th style={{ padding: '6px 8px', borderRight: '1px solid #cbd5e1', textAlign: 'center', width: '7%', fontWeight: 700 }}>ক্র.</th>
+                                      <th style={{ padding: '6px 10px', borderRight: '1px solid #cbd5e1', textAlign: 'left', width: '51%', fontWeight: 700 }}>পণ্যের বিবরণ</th>
+                                      <th style={{ padding: '6px 8px', borderRight: '1px solid #cbd5e1', textAlign: 'center', width: '14%', fontWeight: 700 }}>পরিমাণ</th>
+                                      <th style={{ padding: '6px 10px', borderRight: '1px solid #cbd5e1', textAlign: 'right', width: '14%', fontWeight: 700 }}>একক মূল্য</th>
+                                      <th style={{ padding: '6px 10px', textAlign: 'right', width: '14%', fontWeight: 700 }}>মোট মূল্য</th>
                                     </tr>
                                   </thead>
-                                  <tbody className="divide-y divide-neutral-100">
+                                  <tbody>
                                     {selectedOrder.items.map((item, idx) => (
-                                      <tr key={idx} className="text-[10px] font-medium text-neutral-800">
-                                        <td className="py-1">{item.name}</td>
-                                        <td className="py-1 text-center text-neutral-600">{item.quantity}</td>
-                                        <td className="py-1 text-right text-neutral-600">৳{item.price}</td>
-                                        <td className="py-1 text-right font-bold text-neutral-900">৳{item.price * item.quantity}</td>
+                                      <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', fontSize: '12px', color: '#0f172a' }}>
+                                        <td style={{ padding: '6px 8px', borderRight: '1px solid #e2e8f0', textAlign: 'center', fontFamily: 'monospace', color: '#64748b' }}>
+                                          {idx + 1}
+                                        </td>
+                                        <td style={{ padding: '6px 10px', borderRight: '1px solid #e2e8f0', textAlign: 'left', fontWeight: 600 }}>
+                                          <div>{item.name}</div>
+                                          {(item.selectedColor || item.selectedSize) && (
+                                            <div style={{ fontSize: '10px', fontWeight: 400, color: '#64748b', marginTop: '2px' }}>
+                                              {item.selectedColor && <span>রং: {item.selectedColor} </span>}
+                                              {item.selectedSize && <span>| সাইজ: {item.selectedSize}</span>}
+                                            </div>
+                                          )}
+                                        </td>
+                                        <td style={{ padding: '6px 8px', borderRight: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 700 }}>
+                                          {item.quantity} টি
+                                        </td>
+                                        <td style={{ padding: '6px 10px', borderRight: '1px solid #e2e8f0', textAlign: 'right', fontFamily: 'monospace' }}>
+                                          ৳{item.price}
+                                        </td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>
+                                          ৳{item.price * item.quantity}
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>
                                 </table>
                               </div>
 
-                              {/* Totals & Footer */}
-                              <div className="flex justify-between items-center border-t border-neutral-100 pt-1.5">
-                                <p className="text-[8px] text-neutral-400 font-medium italic">
-                                  আমাদের সাথে কেনাকাটা করার জন্য ধন্যবাদ! {contactInfo.phone && `হটলাইন: ${contactInfo.phone}`}
-                                </p>
-                                <div className="flex items-center gap-3 text-right">
-                                  <div className="text-[9px] text-neutral-500 font-medium space-x-2">
-                                    <span>সাবটোটাল: ৳{subtotal}</span>
-                                    {deliveryFee > 0 && <span>+ ডেলিভারি: ৳{deliveryFee}</span>}
-                                    {codFee > 0 && <span>+ চার্জ: ৳{codFee}</span>}
+                              {/* 4. Bottom Summary (Clean, Spacious, No Signatures) */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1.5px solid #0f172a', paddingTop: '10px' }}>
+                                {/* Left: Thank You & Helpline */}
+                                <div style={{ textAlign: 'left' }}>
+                                  <p style={{ fontSize: '11px', color: '#64748b', margin: 0, fontWeight: 500 }}>
+                                    আমাদের সাথে কেনাকাটা করার জন্য ধন্যবাদ!
+                                  </p>
+                                  <p style={{ fontSize: '12px', color: '#0f172a', margin: '4px 0 0 0', fontWeight: 600 }}>
+                                    যেকোনো প্রয়োজনে কল করুন: <span style={{ color: '#ff4e00', fontWeight: 800 }}>{storePhone}</span>
+                                  </p>
+                                </div>
+
+                                {/* Right: Financial Breakdown & Payable */}
+                                <div style={{ width: '280px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#475569', marginBottom: '3px', padding: '0 4px' }}>
+                                    <span>পণ্য উপমোট:</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>৳{subtotal}</span>
                                   </div>
-                                  <div className="bg-neutral-100 px-2.5 py-0.5 rounded-lg">
-                                    <span className="text-[9px] font-bold text-neutral-600 mr-1">সর্বমোট:</span>
-                                    <span className="text-xs font-black text-primary">৳{grandTotal}</span>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#475569', marginBottom: '3px', padding: '0 4px' }}>
+                                    <span>ডেলিভারি চার্জ:</span>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>৳{deliveryFee}</span>
+                                  </div>
+                                  {codFee > 0 && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#475569', marginBottom: '3px', padding: '0 4px' }}>
+                                      <span>সিওডি / সার্ভিস চার্জ:</span>
+                                      <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>৳{codFee}</span>
+                                    </div>
+                                  )}
+                                  <div style={{
+                                    backgroundColor: '#fff7ed',
+                                    border: '1.5px solid #ff4e00',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    marginTop: '6px'
+                                  }}>
+                                    <div style={{ textAlign: 'left' }}>
+                                      <span style={{ fontSize: '12px', fontWeight: 800, color: '#9a3412', display: 'block', lineHeight: 1.2 }}>
+                                        {isPaid ? 'সর্বমোট পরিশোধিত:' : 'কন্ডিশন / প্রদেয়:'}
+                                      </span>
+                                      <span style={{ fontSize: '10px', color: '#c2410c', fontWeight: 500 }}>
+                                        {isPaid ? '(পরিশোধ সম্পন্ন)' : '(ক্যাশ অন ডেলিভারি)'}
+                                      </span>
+                                    </div>
+                                    <span style={{ fontSize: '18px', fontWeight: 900, color: '#ff4e00', fontFamily: 'monospace' }}>
+                                      ৳{grandTotal}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
@@ -3675,19 +3374,19 @@ export default function AdminPage() {
                             <div 
                               id="invoice-print-container"
                               ref={invoiceRef} 
-                              className="print-invoice-capture bg-white text-neutral-900 mx-auto w-full max-w-2xl space-y-1.5"
-                              style={{ fontFamily: "'Hind Siliguri', sans-serif", width: '720px', backgroundColor: '#ffffff', color: '#111827' }}
+                              className="print-invoice-capture bg-white text-neutral-900 mx-auto w-full max-w-2xl space-y-2"
+                              style={{ fontFamily: "'Hind Siliguri', sans-serif", width: '740px', backgroundColor: '#ffffff', color: '#0f172a' }}
                             >
-                              {renderInvoiceSlip('slip-1')}
+                              {renderInvoiceSlip('slip-1', invoiceCopyMode === 'dual' ? 'গ্রাহক কপি' : undefined)}
 
                               {invoiceCopyMode === 'dual' && (
                                 <>
-                                  <div className="flex items-center justify-center gap-2 my-1 text-[8.5px] font-bold text-neutral-400 border-t border-dashed border-neutral-300 pt-1 select-none">
-                                    <span>✂</span>
-                                    <span className="tracking-wider uppercase">কাটার দাগ (Cut Here)</span>
-                                    <span>✂</span>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', margin: '8px 0', fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>
+                                    <span style={{ flexGrow: 1, borderTop: '1px dashed #cbd5e1' }}></span>
+                                    <span style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>✂ কাটার দাগ (Cut Here)</span>
+                                    <span style={{ flexGrow: 1, borderTop: '1px dashed #cbd5e1' }}></span>
                                   </div>
-                                  {renderInvoiceSlip('slip-2')}
+                                  {renderInvoiceSlip('slip-2', 'অফিস / মার্চেন্ট কপি')}
                                 </>
                               )}
                             </div>
@@ -3753,7 +3452,7 @@ export default function AdminPage() {
             @media print {
               @page {
                 size: A4 portrait;
-                margin: 5mm 6mm;
+                margin: 6mm 7mm;
               }
               /* Hide everything on the page by default */
               body * {
@@ -3773,11 +3472,11 @@ export default function AdminPage() {
                 max-width: 100% !important;
                 height: auto !important;
                 background: white !important;
-                color: #111827 !important;
+                color: #0f172a !important;
                 box-shadow: none !important;
                 border: none !important;
                 margin: 0 !important;
-                padding: 2mm !important;
+                padding: 0 !important;
                 z-index: 999999 !important;
                 overflow: visible !important;
                 border-radius: 0 !important;
@@ -3788,10 +3487,11 @@ export default function AdminPage() {
               .invoice-slip {
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
-                border: 1px solid #d1d5db !important;
-                max-height: 135mm !important;
+                border: 1.5px solid #1e293b !important;
+                max-height: 136mm !important;
                 overflow: hidden !important;
                 margin-bottom: 2mm !important;
+                background: #ffffff !important;
               }
               /* Hide elements marked as no-print */
               .no-print, .no-print * {

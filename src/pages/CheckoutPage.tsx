@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ChevronLeft, Truck, MapPin, Phone, User, CreditCard, ShieldCheck, AlertCircle, CheckCircle2, ShoppingCart, Ban, Zap, Loader2, ArrowRight, ExternalLink } from "lucide-react";
+import { ChevronLeft, Truck, MapPin, Phone, User, CreditCard, ShieldCheck, AlertCircle, CheckCircle2, ShoppingCart, Ban, Zap, Loader2, ArrowRight, ExternalLink, BookmarkCheck, Check, ChevronDown, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import Header from "../components/Header";
@@ -7,11 +7,11 @@ import { useCart } from "../context/CartContext";
 import { useSettings } from "../context/SettingsContext";
 import { useOrders, Order } from "../context/OrderContext";
 import { useAdmin } from "../context/AdminContext";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, UserSavedAddress } from "../context/AuthContext";
 import { sendTelegramNotification, escapeTelegramHtml } from "../utils/telegram";
 import { createSteadfastOrder, getSteadfastTrackingUrl } from "../utils/steadfast";
 import { createUddoktaPayCharge } from "../utils/uddoktapay";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { BD_DIVISIONS, BD_DISTRICTS, BD_UPAZILAS } from "../data/bangladeshLocations";
 
@@ -23,15 +23,147 @@ export default function CheckoutPage() {
   const { contactInfo, shippingSettings, telegramSettings, steadfastSettings, uddoktaPaySettings } = useAdmin();
   const navigate = useNavigate();
   const { addOrder, orders, updateOrder } = useOrders();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
 
   const isUddoktaPayActive = Boolean(
     uddoktaPaySettings?.apiKey?.trim() && 
     (uddoktaPaySettings.isEnabled !== false || (uddoktaPaySettings.apiKey && uddoktaPaySettings.apiKey.length > 8))
   );
 
-  // Find the most recent address from previous orders
+  // Find the most recent address from previous orders as intelligent fallback
   const lastOrderWithAddress = orders.find(o => o.customerInfo && o.customerInfo.address);
+
+  // List of saved addresses from user's profile and storage
+  const [profileAddresses, setProfileAddresses] = useState<UserSavedAddress[]>([]);
+  const [addressAppliedToast, setAddressAppliedToast] = useState<string | null>(null);
+  const [showAddressDropdown, setShowAddressDropdown] = useState(false);
+
+  // Load and assemble all saved profile addresses
+  useEffect(() => {
+    const list: UserSavedAddress[] = [];
+
+    // 1. From Firestore userProfile
+    if (userProfile?.addresses && Array.isArray(userProfile.addresses) && userProfile.addresses.length > 0) {
+      userProfile.addresses.forEach((a, idx) => {
+        if (a && a.address && !list.some(existing => existing.address.trim() === a.address.trim())) {
+          list.push({
+            id: a.id || `profile_${idx}`,
+            type: a.type || (language === 'bn' ? 'বাসা' : 'Home'),
+            name: a.name || userProfile.displayName || user?.displayName || '',
+            phone: a.phone || userProfile.phone || '',
+            address: a.address,
+            division: a.division || '',
+            district: a.district || '',
+            upazila: a.upazila || '',
+            customUpazila: a.customUpazila || '',
+            isDefault: Boolean(a.isDefault)
+          });
+        }
+      });
+    }
+
+    // 2. From userProfile single address if not already present
+    if (userProfile?.address && !list.some(a => a.address.trim() === userProfile.address!.trim())) {
+      list.push({
+        id: 'profile_primary',
+        type: language === 'bn' ? 'বাসা' : 'Home',
+        name: userProfile.displayName || user?.displayName || '',
+        phone: userProfile.phone || '',
+        address: userProfile.address,
+        division: userProfile.division || '',
+        district: userProfile.district || '',
+        upazila: userProfile.upazila || '',
+        isDefault: true
+      });
+    }
+
+    // 3. From localStorage user_addresses
+    try {
+      const saved = localStorage.getItem("user_addresses");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((a: any, idx: number) => {
+            if (a && a.address && !list.some(existing => existing.address.trim() === a.address.trim())) {
+              list.push({
+                id: a.id || `local_${idx}`,
+                type: a.type || (language === 'bn' ? 'সেভ করা ঠিকানা' : 'Saved Address'),
+                name: a.name || userProfile?.displayName || user?.displayName || '',
+                phone: a.phone || userProfile?.phone || '',
+                address: a.address,
+                division: a.division || '',
+                district: a.district || '',
+                upazila: a.upazila || '',
+                customUpazila: a.customUpazila || '',
+                isDefault: Boolean(a.isDefault)
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Error parsing user_addresses:", e);
+    }
+
+    // 4. Fallback to previous order address if no saved profile addresses exist yet
+    if (list.length === 0 && lastOrderWithAddress?.customerInfo?.address) {
+      const info = lastOrderWithAddress.customerInfo;
+      const areaParts = (info.area || "").split(",").map(p => p.trim());
+      list.push({
+        id: 'last_order',
+        type: language === 'bn' ? 'আগের অর্ডারের ঠিকানা' : 'Previous Order',
+        name: info.name || '',
+        phone: info.phone || '',
+        address: info.address || '',
+        division: areaParts[2] || '',
+        district: areaParts[1] || '',
+        upazila: areaParts[0] || '',
+        isDefault: true
+      });
+    }
+
+    setProfileAddresses(list);
+  }, [userProfile, user, lastOrderWithAddress, language]);
+
+  // One-click autofill function for saved profile address
+  const handleApplySavedAddress = (addr: UserSavedAddress) => {
+    const division = addr.division || "";
+    const district = addr.district || "";
+    let upazila = addr.upazila || "";
+    let customUpazila = addr.customUpazila || "";
+
+    if (district && BD_UPAZILAS[district]) {
+      const isKnown = BD_UPAZILAS[district].some(
+        u => u.en.toLowerCase() === upazila.toLowerCase() || u.bn === upazila
+      );
+      if (!isKnown && upazila) {
+        customUpazila = upazila;
+        upazila = "Other";
+      }
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      name: addr.name || prev.name || userProfile?.displayName || user?.displayName || "",
+      phone: addr.phone || prev.phone || userProfile?.phone || "",
+      address: addr.address || prev.address,
+      division: division,
+      district: district,
+      upazila: upazila,
+      customUpazila: customUpazila
+    }));
+
+    const label = addr.type || (language === 'bn' ? 'প্রোফাইলের ঠিকানা' : 'Profile address');
+    setAddressAppliedToast(
+      language === 'bn' 
+        ? `${label} ১-ক্লিকে সফলভাবে যুক্ত হয়েছে!` 
+        : `${label} applied successfully in 1 click!`
+    );
+    setShowAddressDropdown(false);
+    setTimeout(() => {
+      setAddressAppliedToast(null);
+    }, 3500);
+  };
 
   const [formData, setFormData] = useState({
     name: "",
@@ -346,12 +478,18 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
         }
       }
       
-      // Save address for future use
-      const newAddress = {
+      // Save address for future use and sync with profile
+      const newAddress: UserSavedAddress = {
         id: Date.now(),
-        type: "Shipping Address",
+        type: language === 'bn' ? "বাসা" : "Home",
+        name: formData.name,
+        phone: formData.phone,
         address: formData.address,
-        phone: formData.phone
+        division: formData.division,
+        district: formData.district,
+        upazila: formData.upazila === "Other" && formData.customUpazila ? formData.customUpazila : formData.upazila,
+        customUpazila: formData.customUpazila,
+        isDefault: true
       };
 
       try {
@@ -359,9 +497,19 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
         let savedAddresses = saved ? JSON.parse(saved) : [];
         if (!Array.isArray(savedAddresses)) savedAddresses = [];
         
-        const isDuplicate = savedAddresses.some((a: any) => (a.address + a.phone) === (formData.address + formData.phone));
-        if (!isDuplicate) {
-          localStorage.setItem("user_addresses", JSON.stringify([newAddress, ...savedAddresses].slice(0, 5)));
+        const filtered = savedAddresses.filter((a: any) => a.address?.trim() !== formData.address.trim());
+        const updatedList = [newAddress, ...filtered].slice(0, 5);
+        localStorage.setItem("user_addresses", JSON.stringify(updatedList));
+
+        if (user) {
+          updateDoc(doc(db, "users", user.uid), {
+            address: formData.address,
+            phone: formData.phone,
+            division: formData.division,
+            district: formData.district,
+            upazila: formData.upazila === "Other" && formData.customUpazila ? formData.customUpazila : formData.upazila,
+            addresses: updatedList
+          }).catch(e => console.warn("Background profile address sync skipped:", e));
         }
       } catch (e) {
         console.error("Address save error", e);
@@ -465,35 +613,105 @@ ${orderData.items.map(item => `- ${escapeTelegramHtml(item.name)} x${item.quanti
               {/* Validation Alert removed as logic is simplified */}
 
               <div className={`p-8 bg-white dark:bg-neutral-900 rounded-[2.5rem] border border-neutral-100 dark:border-neutral-800 shadow-sm ${isMixedCart ? "opacity-50 pointer-events-none" : ""}`}>
-                <h3 className="text-xl font-bold mb-6 flex items-center justify-between gap-2">
+                <h3 className="text-xl font-bold mb-6 flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
                     <MapPin size={20} className="text-primary" />
                     {language === 'bn' ? "ডেলিভারি তথ্য" : "Delivery Information"}
                   </div>
                   
-                  {lastOrderWithAddress && (
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        const info = lastOrderWithAddress.customerInfo;
-                        const areaParts = (info.area || "").split(",").map(p => p.trim());
-                        setFormData({
-                          ...formData,
-                          name: info.name,
-                          phone: info.phone,
-                          address: info.address,
-                          division: areaParts[2] || "",
-                          district: areaParts[1] || "",
-                          upazila: areaParts[0] || ""
-                        });
-                      }}
-                      className="text-[10px] font-black text-primary bg-primary/10 px-3 py-1.5 rounded-xl hover:bg-primary hover:text-white transition-all flex items-center gap-1"
-                    >
-                      <Truck size={12} />
-                      {language === 'bn' ? "আগের ঠিকানা ব্যবহার করুন" : "Use Previous Address"}
-                    </button>
+                  {/* One-click apply saved profile address button in place of previous address button */}
+                  {profileAddresses.length > 0 && (
+                    <div className="relative">
+                      {profileAddresses.length === 1 ? (
+                        <button 
+                          type="button"
+                          onClick={() => handleApplySavedAddress(profileAddresses[0])}
+                          className="text-xs font-bold text-primary bg-primary/10 hover:bg-primary hover:text-white px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 shadow-sm active:scale-95 group border border-primary/20"
+                          title={language === 'bn' ? "প্রোফাইলের সেভ করা ঠিকানা ১ ক্লিকে ফর্মটিতে বসান" : "One-click autofill profile address"}
+                        >
+                          <BookmarkCheck size={14} className="group-hover:scale-110 transition-transform" />
+                          <span>{language === 'bn' ? "সেভ করা ঠিকানা দিন" : "Use Saved Address"}</span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center shadow-sm rounded-xl border border-primary/20 bg-primary/10 overflow-hidden">
+                          <button 
+                            type="button"
+                            onClick={() => handleApplySavedAddress(profileAddresses[0])}
+                            className="text-xs font-bold text-primary hover:bg-primary hover:text-white px-3 py-1.5 transition-all flex items-center gap-1.5 active:scale-95 group"
+                            title={language === 'bn' ? `${profileAddresses[0].type || 'প্রধান'} ঠিকানা ১ ক্লিকে বসান` : "Use primary saved address"}
+                          >
+                            <BookmarkCheck size={14} className="group-hover:scale-110 transition-transform" />
+                            <span>{language === 'bn' ? "সেভ করা ঠিকানা দিন" : "Use Saved Address"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowAddressDropdown(prev => !prev)}
+                            className="text-primary hover:bg-primary hover:text-white px-2 py-1.5 transition-all border-l border-primary/20"
+                            title={language === 'bn' ? "অন্যান্য সেভ করা ঠিকানা দেখুন" : "View other saved addresses"}
+                            aria-label="Toggle address list"
+                          >
+                            <ChevronDown size={14} className={`transition-transform duration-200 ${showAddressDropdown ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Dropdown menu for multiple saved addresses */}
+                      {showAddressDropdown && profileAddresses.length > 1 && (
+                        <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 rounded-2xl shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <div className="px-3 py-2 text-[10px] font-black text-neutral-400 uppercase tracking-wider border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+                            <span>{language === 'bn' ? 'সেভ করা ঠিকানাসমূহ' : 'Saved Addresses'}</span>
+                            <span className="text-primary font-bold">{profileAddresses.length}</span>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto space-y-1 py-1.5">
+                            {profileAddresses.map((addr) => (
+                              <button
+                                key={addr.id}
+                                type="button"
+                                onClick={() => handleApplySavedAddress(addr)}
+                                className="w-full text-left p-2.5 rounded-xl hover:bg-primary/10 dark:hover:bg-primary/20 transition-colors group flex items-start gap-2.5"
+                              >
+                                <div className="p-1.5 rounded-lg bg-primary/10 text-primary mt-0.5 group-hover:bg-primary group-hover:text-white transition-colors shrink-0">
+                                  <MapPin size={13} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <span className="font-bold text-xs text-neutral-800 dark:text-neutral-200 truncate">
+                                      {addr.type || 'ঠিকানা'}
+                                    </span>
+                                    {addr.phone && (
+                                      <span className="text-[10px] font-mono text-neutral-400">{addr.phone}</span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 line-clamp-1 mt-0.5">
+                                    {addr.address}
+                                  </p>
+                                  {(addr.upazila || addr.district || addr.division) && (
+                                    <span className="inline-block text-[9px] font-bold text-primary mt-0.5">
+                                      {[addr.upazila, addr.district, addr.division].filter(Boolean).join(", ")}
+                                    </span>
+                                  )}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </h3>
+
+                {/* Instant Feedback Banner when address is applied */}
+                {addressAppliedToast && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="mb-4 px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl flex items-center gap-2 text-emerald-700 dark:text-emerald-300 text-xs font-bold"
+                  >
+                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                    <span>{addressAppliedToast}</span>
+                  </motion.div>
+                )}
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
