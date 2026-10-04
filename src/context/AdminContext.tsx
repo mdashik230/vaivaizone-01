@@ -210,9 +210,14 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const cats: Record<string, Category> = {};
         snapshot.docs.forEach(doc => {
           const data = doc.data() as any;
+          const rawSubs = data.subcategories || data.subCategories || [];
           cats[doc.id] = { 
             ...data, 
-            subcategories: data.subcategories || data.subCategories || []
+            id: data.id || doc.id,
+            subcategories: rawSubs.map((s: any) => ({
+              ...s,
+              id: s.id || s.name?.toLowerCase().replace(/\s+/g, '-') || `sub-${Date.now()}`
+            }))
           } as Category;
         });
         setCategories(cats);

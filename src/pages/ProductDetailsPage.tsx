@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { ChevronLeft, ShoppingCart, Heart, Share2, Star, Minus, Plus, ShoppingBag, ShieldCheck, Truck, RotateCcw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Header from "../components/Header";
@@ -190,9 +190,38 @@ export default function ProductDetailsPage() {
             >
               <div className="mb-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md">
-                    {product.category} {product.subCategory && `/ ${product.subCategory}`}
-                  </span>
+                  {(() => {
+                    const catObj = categories[product.category] || Object.values(categories).find(c => c.id === product.category || c.name?.toLowerCase() === product.category?.toLowerCase());
+                    const catName = catObj?.name || product.category;
+                    const catKey = Object.keys(categories).find(k => categories[k] === catObj) || catObj?.id || product.category;
+                    const subObj = catObj?.subcategories?.find(s => s.id === product.subCategory || s.name === product.subCategory);
+                    const subName = subObj?.name || product.subCategory;
+                    const subSlug = subName ? subName.trim().toLowerCase().replace(/\s+/g, '-') : '';
+
+                    return (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {catName && (
+                          <Link 
+                            to={`/category/${catKey}`}
+                            className="bg-primary/10 hover:bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md transition-colors"
+                          >
+                            {catName}
+                          </Link>
+                        )}
+                        {subName && (
+                          <>
+                            <span className="text-neutral-400 text-xs">/</span>
+                            <Link 
+                              to={`/category/${catKey}/${encodeURIComponent(subSlug)}`}
+                              className="bg-neutral-100 dark:bg-neutral-800 hover:bg-primary/10 hover:text-primary text-neutral-600 dark:text-neutral-300 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md transition-colors"
+                            >
+                              {subName}
+                            </Link>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex items-center gap-1 text-yellow-400 ml-auto">
                     <Star size={14} fill="currentColor" />
                     <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300">4.8</span>

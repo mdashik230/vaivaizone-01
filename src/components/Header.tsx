@@ -56,9 +56,11 @@ export default function Header() {
     setSearchQuery(query);
 
     if (query.length > 0) {
+      const q = query.toLowerCase();
       const filtered = products.filter((product) =>
-        product.name.toLowerCase().includes(query.toLowerCase()) ||
-        product.category.toLowerCase().includes(query.toLowerCase())
+        product.name.toLowerCase().includes(q) ||
+        (product.category || "").toLowerCase().includes(q) ||
+        ((product as any).subCategory || "").toLowerCase().includes(q)
       ).slice(0, 8); // Limit results to 8
       setSearchResults(filtered);
       setShowResults(true);

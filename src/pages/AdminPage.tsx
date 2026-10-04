@@ -2041,10 +2041,10 @@ export default function AdminPage() {
 
   const renderSubcategories = () => {
     const allSubcategories: {sub: Subcategory, parentId: string, parentName: string}[] = [];
-    (Object.values(categories) as Category[]).forEach(cat => {
+    (Object.entries(categories) as [string, Category][]).forEach(([key, cat]) => {
       if (cat.subcategories) {
         cat.subcategories.forEach(sub => {
-          allSubcategories.push({ sub, parentId: cat.id, parentName: cat.name });
+          allSubcategories.push({ sub, parentId: key, parentName: cat.name });
         });
       }
     });
@@ -2075,9 +2075,13 @@ export default function AdminPage() {
                     <div className="flex gap-1">
                       <button onClick={() => setEditingSubcategory({ sub, parentId })} className="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-xl"><Edit2 size={16}/></button>
                       <button onClick={() => {
-                        const newSubs = (categories[parentId].subcategories || []).filter(s => s.id !== sub.id);
-                        updateCategory(parentId, { subcategories: newSubs });
-                        showNotification('সাব-ক্যাটাগরি রিমুভ করা হয়েছে');
+                        const targetCat = categories[parentId] || Object.values(categories).find(c => c.id === parentId);
+                        const catKey = categories[parentId] ? parentId : (Object.keys(categories).find(k => categories[k].id === parentId) || parentId);
+                        const newSubs = (targetCat?.subcategories || []).filter(s => s.id !== sub.id && s.name !== sub.name);
+                        if (targetCat) {
+                          updateCategory(catKey, { subcategories: newSubs });
+                          showNotification('সাব-ক্যাটাগরি রিমুভ করা হয়েছে');
+                        }
                       }} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl"><Trash2 size={16}/></button>
                     </div>
                   </div>
@@ -2104,8 +2108,8 @@ export default function AdminPage() {
                       className="w-full px-6 py-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800 border-none font-bold"
                     >
                       <option value="">Select Main Category</option>
-                      {Object.values(categories).map((cat: any) => (
-                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      {Object.entries(categories).map(([k, cat]: [string, any]) => (
+                        <option key={k} value={k}>{cat.name}</option>
                       ))}
                     </select>
                   </div>
@@ -2145,17 +2149,21 @@ export default function AdminPage() {
                   onClick={async () => {
                     try {
                       if (!editingSubcategory.parentId) return showNotification('মেইন ক্যাটাগরি সিলেক্ট করুন', 'error');
-                      if (!editingSubcategory.sub.name) return showNotification('নাম দিন', 'error');
+                      if (!editingSubcategory.sub.name?.trim()) return showNotification('নাম দিন', 'error');
 
                       const parentId = editingSubcategory.parentId;
-                      const cat = categories[parentId];
+                      const cat = categories[parentId] || Object.values(categories).find((c: any) => c.id === parentId);
+                      if (!cat) return showNotification('মেইন ক্যাটাগরি পাওয়া যায়নি', 'error');
+                      const catKey = categories[parentId] ? parentId : (Object.keys(categories).find(k => categories[k].id === parentId) || parentId);
                       const currentSubs = [...(cat.subcategories || [])];
 
                       if (editingSubcategory.sub.id) {
                         // Update
-                        const idx = currentSubs.findIndex(s => s.id === editingSubcategory.sub.id);
+                        const idx = currentSubs.findIndex(s => s.id === editingSubcategory.sub.id || (s.name && s.name.toLowerCase() === editingSubcategory.sub.name?.toLowerCase()));
                         if (idx !== -1) {
-                          currentSubs[idx] = editingSubcategory.sub as Subcategory;
+                          currentSubs[idx] = { ...currentSubs[idx], ...editingSubcategory.sub } as Subcategory;
+                        } else {
+                          currentSubs.push(editingSubcategory.sub as Subcategory);
                         }
                       } else {
                         // Add
@@ -2165,7 +2173,7 @@ export default function AdminPage() {
                         } as Subcategory);
                       }
 
-                      await updateCategory(parentId, { subcategories: currentSubs });
+                      await updateCategory(catKey, { subcategories: currentSubs });
                       setEditingSubcategory(null);
                       showNotification('সাব-ক্যাটাগরি সেভ করা হয়েছে');
                     } catch (err) {
@@ -2212,14 +2220,24 @@ export default function AdminPage() {
             <div>
               <img src={p.image} className="w-full aspect-square object-cover rounded-2xl mb-4" alt="" />
               <div className="flex flex-wrap gap-1 mb-2">
-                <span className="text-[8px] px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 rounded font-black text-neutral-500 uppercase tracking-tighter">
-                  {categories[p.category]?.name || p.category}
-                </span>
-                {p.subCategory && (
-                  <span className="text-[8px] px-1.5 py-0.5 bg-primary/10 rounded font-black text-primary uppercase tracking-tighter">
-                    {categories[p.category]?.subcategories?.find(s => s.id === p.subCategory)?.name || p.subCategory}
-                  </span>
-                )}
+                {(() => {
+                  const catObj = categories[p.category] || Object.values(categories).find(c => c.id === p.category || c.name?.toLowerCase() === p.category?.toLowerCase());
+                  const catName = catObj?.name || p.category;
+                  const subObj = catObj?.subcategories?.find(s => s.id === p.subCategory || s.name === p.subCategory);
+                  const subName = subObj?.name || p.subCategory;
+                  return (
+                    <>
+                      <span className="text-[8px] px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 rounded font-black text-neutral-500 uppercase tracking-tighter">
+                        {catName}
+                      </span>
+                      {p.subCategory && (
+                        <span className="text-[8px] px-1.5 py-0.5 bg-primary/10 rounded font-black text-primary uppercase tracking-tighter">
+                          {subName}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <h4 className="font-bold mb-2 line-clamp-1 text-sm">{p.name}</h4>
             </div>
@@ -3568,32 +3586,55 @@ export default function AdminPage() {
                                 <span className="text-[10px] bg-red-50 text-red-500 px-2 py-1 rounded-lg font-black uppercase tracking-widest">Auto Calculated Discount: {editingProduct.discount}</span>
                             </div>
                         )}
-                     <div className="space-y-2">
-                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Category</label>
-                        <select 
-                          value={editingProduct.category || ''} 
-                          onChange={e => setEditingProduct({...editingProduct, category: e.target.value, subCategory: ''})} 
-                          className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold"
-                        >
-                           <option value="">Select Category</option>
-                           {Object.keys(categories).map(k => <option key={k} value={k}>{categories[k].name}</option>)}
-                        </select>
-                     </div>
-                     <div className="space-y-2">
-                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Sub Category</label>
-                        <select 
-                          value={editingProduct.subCategory || ''} 
-                          onChange={e => setEditingProduct({...editingProduct, subCategory: e.target.value})} 
-                          className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold"
-                          disabled={!editingProduct.category}
-                        >
-                           <option value="">Select Sub-Category</option>
-                           {editingProduct.category && categories[editingProduct.category]?.subcategories ? categories[editingProduct.category].subcategories.map((sub: any) => (
-                             <option key={sub.id || sub.name} value={sub.id || sub.name}>{sub.name}</option>
-                           )) : null}
-                        </select>
-                     </div>
-                  </div>
+                      {(() => {
+                        const selectedCatKey = Object.keys(categories).find(k => 
+                          k === editingProduct.category || 
+                          categories[k].id === editingProduct.category || 
+                          categories[k].name?.toLowerCase() === editingProduct.category?.toLowerCase()
+                        ) || editingProduct.category || '';
+
+                        const currentCatSubs = (selectedCatKey && categories[selectedCatKey]?.subcategories) 
+                          ? categories[selectedCatKey].subcategories 
+                          : [];
+
+                        const currentSubMatch = currentCatSubs.find((s: any) => 
+                          s.id === editingProduct.subCategory || 
+                          s.name === editingProduct.subCategory ||
+                          s.name?.toLowerCase() === editingProduct.subCategory?.toLowerCase()
+                        );
+                        const selectedSubVal = currentSubMatch ? currentSubMatch.name : (editingProduct.subCategory || '');
+
+                        return (
+                          <>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Category</label>
+                              <select 
+                                value={selectedCatKey} 
+                                onChange={e => setEditingProduct({...editingProduct, category: e.target.value, subCategory: ''})} 
+                                className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold"
+                              >
+                                 <option value="">Select Category</option>
+                                 {Object.keys(categories).map(k => <option key={k} value={k}>{categories[k].name}</option>)}
+                              </select>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Sub Category</label>
+                              <select 
+                                value={selectedSubVal} 
+                                onChange={e => setEditingProduct({...editingProduct, subCategory: e.target.value})} 
+                                className="w-full px-5 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800 font-bold"
+                                disabled={!selectedCatKey}
+                              >
+                                 <option value="">Select Sub-Category</option>
+                                 {currentCatSubs.map((sub: any) => (
+                                   <option key={sub.id || sub.name} value={sub.name || sub.id}>{sub.name}</option>
+                                 ))}
+                              </select>
+                            </div>
+                          </>
+                        );
+                      })()}
+                   </div>
                   <div className="space-y-4">
                     <div className="space-y-2">
                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Main Image</label>

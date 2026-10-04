@@ -52,25 +52,27 @@ export const ALL_PRODUCTS: Product[] = [
 
 export const CATEGORY_DATA: Record<string, any> = {
   "gadgets-accessories": {
+    id: "gadgets-accessories",
     name: "Gadgets & Accessories",
     image: "https://images.unsplash.com/photo-1546054452-963030310217?auto=format&fit=crop&q=80&w=1200",
     subcategories: [
-      { name: "Smartphones", image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&q=80&w=400" },
-      { name: "Smartwatches", image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400" },
-      { name: "Headphones", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400" },
-      { name: "Power Banks", image: "https://images.unsplash.com/photo-1609592424109-dd0369877478?auto=format&fit=crop&q=80&w=400" },
-      { name: "Laptops", image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&q=80&w=400" },
-      { name: "Gaming Gear", image: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=400" }
+      { id: "smartphones", name: "Smartphones", image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&q=80&w=400" },
+      { id: "smartwatches", name: "Smartwatches", image: "https://images.unsplash.com/photo-1579586337278-3befd40fd17a?auto=format&fit=crop&q=80&w=400" },
+      { id: "headphones", name: "Headphones", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=400" },
+      { id: "power-banks", name: "Power Banks", image: "https://images.unsplash.com/photo-1609592424109-dd0369877478?auto=format&fit=crop&q=80&w=400" },
+      { id: "laptops", name: "Laptops", image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&q=80&w=400" },
+      { id: "gaming-gear", name: "Gaming Gear", image: "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&q=80&w=400" }
     ]
   },
   "fashion-lifestyle": {
+    id: "fashion-lifestyle",
     name: "Fashion & Lifestyle",
     image: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&q=80&w=1200",
     subcategories: [
-      { name: "Men's Wear", image: "https://images.unsplash.com/photo-1490578474895-699cd4e2cf59?auto=format&fit=crop&q=80&w=400" },
-      { name: "Women's Wear", image: "https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&q=80&w=400" },
-      { name: "Footwear", image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=400" },
-      { name: "Watches", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=400" }
+      { id: "mens-wear", name: "Men's Wear", image: "https://images.unsplash.com/photo-1490578474895-699cd4e2cf59?auto=format&fit=crop&q=80&w=400" },
+      { id: "womens-wear", name: "Women's Wear", image: "https://images.unsplash.com/photo-1485230895905-ec40ba36b9bc?auto=format&fit=crop&q=80&w=400" },
+      { id: "footwear", name: "Footwear", image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=400" },
+      { id: "watches", name: "Watches", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=400" }
     ]
   }
 };
